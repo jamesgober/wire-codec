@@ -1,0 +1,58 @@
+﻿[package]
+name = "wire-codec"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.75"
+readme = "README.md"
+license = "Apache-2.0 OR MIT"
+
+authors = [
+    "James Gober <me@jamesgober.com>"
+]
+
+description = "Binary frame codec and protocol codec toolkit. Length-prefixed, delimiter-based, and custom framing strategies. Built-in varint, zigzag, bitfield, and packed struct encoding. Runtime-agnostic foundation under network-protocol crates."
+
+keywords = [
+    "codec",
+    "framing",
+    "varint",
+    "wire",
+    "rust"
+]
+
+categories = [
+    "encoding",
+    "network-programming"
+]
+
+documentation = "https://docs.rs/wire-codec"
+repository    = "https://github.com/jamesgober/wire-codec"
+homepage      = "https://github.com/jamesgober/wire-codec"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+name = "wire_codec"
+path = "src/lib.rs"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+
+[dev-dependencies]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+
+[profile.bench]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = true
