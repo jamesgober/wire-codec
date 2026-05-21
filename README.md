@@ -25,8 +25,25 @@ Binary frame codec and protocol codec toolkit. Length-prefixed, delimiter-based,
 
 ```toml
 [dependencies]
-wire-codec = "0.1"
+wire-codec = "0.2"
 ```
+
+```rust
+use wire_codec::WriteBuf;
+use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
+
+let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+
+let mut out = [0u8; 32];
+let mut buf = WriteBuf::new(&mut out);
+framer.write_frame(b"ping", &mut buf).unwrap();
+let n = buf.position();
+
+let frame = framer.next_frame(&out[..n]).unwrap().unwrap();
+assert_eq!(frame.payload(), b"ping");
+```
+
+See [`docs/API.md`](docs/API.md) for the full API reference.
 
 ---
 
