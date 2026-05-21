@@ -17,7 +17,7 @@ use crate::framing::{Frame, Framer};
 /// use wire_codec::WriteBuf;
 /// use wire_codec::framing::{Delimited, Framer};
 ///
-/// let framer = Delimited::new(b"\n");
+/// let framer = Delimited::new(b"\n").unwrap();
 ///
 /// let mut out = [0u8; 32];
 /// let mut buf = WriteBuf::new(&mut out);
@@ -30,7 +30,7 @@ use crate::framing::{Frame, Framer};
 /// assert_eq!(first.payload(), b"line one");
 /// assert_eq!(first.consumed(), 9);
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Delimited<'d> {
     delimiter: &'d [u8],
     max_payload: usize,
@@ -39,18 +39,19 @@ pub struct Delimited<'d> {
 impl<'d> Delimited<'d> {
     /// Build a framer using `delimiter` to separate frames.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `delimiter` is empty. An empty delimiter cannot uniquely
-    /// separate frames and is a programmer error.
+    /// Returns [`Error::EmptyDelimiter`] if `delimiter` is empty. An empty
+    /// delimiter cannot uniquely separate frames.
     #[inline]
-    pub const fn new(delimiter: &'d [u8]) -> Self {
-        // Compile-time guard against the empty-delimiter footgun.
-        assert!(!delimiter.is_empty(), "delimiter must be non-empty");
-        Self {
+    pub const fn new(delimiter: &'d [u8]) -> Result<Self> {
+        if delimiter.is_empty() {
+            return Err(Error::EmptyDelimiter);
+        }
+        Ok(Self {
             delimiter,
             max_payload: usize::MAX,
-        }
+        })
     }
 
     /// Set an upper bound on payload size. Frames whose payload would exceed
@@ -144,7 +145,7 @@ mod tests {
 
     #[test]
     fn newline_round_trip() {
-        let framer = Delimited::new(b"\n");
+        let framer = Delimited::new(b"\n").unwrap();
         let mut storage = [0u8; 32];
         let mut buf = WriteBuf::new(&mut storage);
         framer.write_frame(b"hello", &mut buf).unwrap();
@@ -158,7 +159,7 @@ mod tests {
 
     #[test]
     fn multi_byte_delimiter() {
-        let framer = Delimited::new(b"\r\n");
+        let framer = Delimited::new(b"\r\n").unwrap();
         let frame = framer.next_frame(b"GET /\r\nrest").unwrap().unwrap();
         assert_eq!(frame.payload(), b"GET /");
         assert_eq!(frame.consumed(), 7);
@@ -166,7 +167,7 @@ mod tests {
 
     #[test]
     fn no_delimiter_returns_none() {
-        let framer = Delimited::new(b"\n");
+        let framer = Delimited::new(b"\n").unwrap();
         assert_eq!(framer.next_frame(b"no terminator here").unwrap(), None);
     }
 
@@ -175,16 +176,22 @@ mod tests {
         // Input is 6 bytes; max_payload=3 limits the scan window to 4 bytes
         // (3 + delimiter length). The delimiter is beyond the window, so the
         // framer bails with FrameTooLarge instead of scanning to the end.
-        let framer = Delimited::new(b"\n").with_max_payload(3);
+        let framer = Delimited::new(b"\n").unwrap().with_max_payload(3);
         let result = framer.next_frame(b"abcde\n");
         assert!(matches!(result, Err(Error::FrameTooLarge { limit: 3, .. })));
     }
 
     #[test]
     fn empty_payload_is_valid() {
-        let framer = Delimited::new(b"\n");
+        let framer = Delimited::new(b"\n").unwrap();
         let frame = framer.next_frame(b"\nrest").unwrap().unwrap();
         assert_eq!(frame.payload(), b"");
         assert_eq!(frame.consumed(), 1);
+    }
+
+    #[test]
+    fn empty_delimiter_rejected() {
+        let result = Delimited::new(b"");
+        assert!(matches!(result, Err(Error::EmptyDelimiter)));
     }
 }

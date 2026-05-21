@@ -37,6 +37,7 @@ use crate::error::Result;
 /// ```
 pub trait Encode {
     /// Number of bytes [`Encode::encode`] will write on success.
+    #[must_use]
     fn encoded_size(&self) -> usize;
 
     /// Write `self` into `buf`, advancing its write position.

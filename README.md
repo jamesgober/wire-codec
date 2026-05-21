@@ -25,7 +25,7 @@ Binary frame codec and protocol codec toolkit. Length-prefixed, delimiter-based,
 
 ```toml
 [dependencies]
-wire-codec = "0.5"
+wire-codec = "0.9"
 ```
 
 ```rust

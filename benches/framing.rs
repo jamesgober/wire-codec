@@ -59,7 +59,7 @@ fn bench_length_prefixed_read() {
 }
 
 fn bench_delimited_scan_short() {
-    let framer = Delimited::new(b"\n");
+    let framer = Delimited::new(b"\n").expect("non-empty delimiter");
     let wire = b"short line\nrest of the buffer that we never reach";
     time_loop("Delimited::next_frame (short line)", ITERATIONS, || {
         let frame = framer
@@ -71,7 +71,7 @@ fn bench_delimited_scan_short() {
 }
 
 fn bench_delimited_scan_long() {
-    let framer = Delimited::new(b"\r\n");
+    let framer = Delimited::new(b"\r\n").expect("non-empty delimiter");
     let mut wire = vec![b'A'; 1024];
     wire.extend_from_slice(b"\r\nbody");
     time_loop(

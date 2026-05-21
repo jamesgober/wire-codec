@@ -19,6 +19,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.0] - 2026-05-21
+
+### Added
+
+- `Error::EmptyDelimiter` variant returned by `Delimited::new` when the
+  delimiter is empty.
+- `#[non_exhaustive]` on `LengthWidth` so wider prefix widths can be added
+  in future minor releases.
+- `PartialEq`, `Eq`, `Hash` derives on `LengthPrefixed`, `Delimited`,
+  `LengthWidth`, and `Endian`.
+- `#[must_use]` on `Encode::encoded_size`.
+- `# Errors` doc sections on every `Result`-returning function in
+  `buf`, `varint`, `bitfield`, and `framing`.
+- `rust-toolchain.toml` pinning the toolchain channel for reproducible
+  builds.
+- `deny.toml` policy file for `cargo deny` (license allow-list, banned
+  crates, duplicate version warning, registry source restriction).
+- `supply-chain` CI job running `cargo audit` and `cargo deny check` on
+  every push and pull request.
+- Canonical `REPS.md` vendored from the workspace standard.
+- `docs/release/v0.9.0.md` audit report covering every section of REPS.
+
+### Changed
+
+- **Breaking:** `framing::Delimited::new(delimiter)` now returns
+  `Result<Delimited<'_>, Error>` instead of `Self`. An empty delimiter
+  yields `Err(Error::EmptyDelimiter)` rather than panicking. Update call
+  sites with `.unwrap()` or `?` as appropriate.
+- Crate-level lint set expanded to the REPS-mandated full configuration
+  (`#![deny(warnings)]`, `#![deny(clippy::unreachable)]`).
+
+### Fixed
+
+- `Delimited::new` no longer panics on empty input. This was the only
+  panic point in the shipping code paths.
+
+### Security
+
+- `cargo audit` and `cargo deny` are now part of CI. Any RustSec
+  advisory, banned crate, or license violation in the dependency tree
+  blocks the merge.
+
+---
+
 ## [0.5.0] - 2026-05-21
 
 ### Added
@@ -89,7 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - REPS compliance baseline.
 - CI for Linux/macOS/Windows on stable and MSRV (1.75).
 
-[Unreleased]: https://github.com/jamesgober/wire-codec/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jamesgober/wire-codec/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/jamesgober/wire-codec/compare/v0.5.0...v0.9.0
 [0.5.0]: https://github.com/jamesgober/wire-codec/compare/v0.2.0...v0.5.0
 [0.2.0]: https://github.com/jamesgober/wire-codec/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jamesgober/wire-codec/releases/tag/v0.1.0

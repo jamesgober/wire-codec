@@ -56,7 +56,7 @@ fn length_prefixed_stream_with_partial_delivery() {
 
 #[test]
 fn newline_protocol_parses_commands() {
-    let framer = Delimited::new(b"\n").with_max_payload(1024);
+    let framer = Delimited::new(b"\n").unwrap().with_max_payload(1024);
     let transcript = b"PING\nECHO hello world\nQUIT\n";
 
     let mut input: &[u8] = transcript;
@@ -77,8 +77,8 @@ fn newline_protocol_parses_commands() {
 
 #[test]
 fn crlf_protocol_extracts_request_line_and_headers() {
-    let framer = Delimited::new(b"\r\n");
-    let request = b"GET /index.html HTTP/1.1\r\nHost: example.com\r\nUser-Agent: wire-codec/0.5\r\n\r\nbody-bytes";
+    let framer = Delimited::new(b"\r\n").unwrap();
+    let request = b"GET /index.html HTTP/1.1\r\nHost: example.com\r\nUser-Agent: wire-codec/0.9\r\n\r\nbody-bytes";
 
     let mut input: &[u8] = request;
     let request_line = framer.next_frame(input).unwrap().unwrap();
@@ -99,7 +99,7 @@ fn crlf_protocol_extracts_request_line_and_headers() {
         headers,
         vec![
             b"Host: example.com".as_slice(),
-            b"User-Agent: wire-codec/0.5"
+            b"User-Agent: wire-codec/0.9"
         ]
     );
     assert_eq!(input, b"body-bytes");

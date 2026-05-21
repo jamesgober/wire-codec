@@ -9,7 +9,11 @@ use crate::error::{Error, Result};
 use crate::framing::{Frame, Framer};
 
 /// Width of the length prefix, in bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Marked `#[non_exhaustive]` so wider prefix widths can be added in future
+/// minor releases without a major version bump.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LengthWidth {
     /// One-byte length prefix; payload up to 255 bytes.
     U8,
@@ -42,7 +46,7 @@ impl LengthWidth {
 }
 
 /// Byte order for the length prefix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Endian {
     /// Most significant byte first (network order).
     Big,
@@ -70,7 +74,7 @@ pub enum Endian {
 /// assert_eq!(frame.payload(), b"hello");
 /// assert_eq!(frame.consumed(), 7);
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LengthPrefixed {
     width: LengthWidth,
     endian: Endian,

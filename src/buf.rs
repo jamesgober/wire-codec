@@ -115,6 +115,10 @@ impl<'a> ReadBuf<'a> {
     }
 
     /// Read a big-endian `u16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEof`] when fewer than 2 bytes remain.
     #[inline]
     pub fn read_u16_be(&mut self) -> Result<u16> {
         let bytes = self.read_bytes(2)?;
@@ -122,6 +126,10 @@ impl<'a> ReadBuf<'a> {
     }
 
     /// Read a little-endian `u16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEof`] when fewer than 2 bytes remain.
     #[inline]
     pub fn read_u16_le(&mut self) -> Result<u16> {
         let bytes = self.read_bytes(2)?;
@@ -129,6 +137,10 @@ impl<'a> ReadBuf<'a> {
     }
 
     /// Read a big-endian `u32`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEof`] when fewer than 4 bytes remain.
     #[inline]
     pub fn read_u32_be(&mut self) -> Result<u32> {
         let bytes = self.read_bytes(4)?;
@@ -136,6 +148,10 @@ impl<'a> ReadBuf<'a> {
     }
 
     /// Read a little-endian `u32`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEof`] when fewer than 4 bytes remain.
     #[inline]
     pub fn read_u32_le(&mut self) -> Result<u32> {
         let bytes = self.read_bytes(4)?;
@@ -143,6 +159,10 @@ impl<'a> ReadBuf<'a> {
     }
 
     /// Read a big-endian `u64`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEof`] when fewer than 8 bytes remain.
     #[inline]
     pub fn read_u64_be(&mut self) -> Result<u64> {
         let bytes = self.read_bytes(8)?;
@@ -152,6 +172,10 @@ impl<'a> ReadBuf<'a> {
     }
 
     /// Read a little-endian `u64`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEof`] when fewer than 8 bytes remain.
     #[inline]
     pub fn read_u64_le(&mut self) -> Result<u64> {
         let bytes = self.read_bytes(8)?;
@@ -229,6 +253,10 @@ impl<'a> WriteBuf<'a> {
     }
 
     /// Write a single byte.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if no capacity remains.
     #[inline]
     pub fn write_u8(&mut self, value: u8) -> Result<()> {
         if self.pos >= self.bytes.len() {
@@ -240,36 +268,60 @@ impl<'a> WriteBuf<'a> {
     }
 
     /// Write a big-endian `u16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if fewer than 2 bytes remain.
     #[inline]
     pub fn write_u16_be(&mut self, value: u16) -> Result<()> {
         self.write_bytes(&value.to_be_bytes())
     }
 
     /// Write a little-endian `u16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if fewer than 2 bytes remain.
     #[inline]
     pub fn write_u16_le(&mut self, value: u16) -> Result<()> {
         self.write_bytes(&value.to_le_bytes())
     }
 
     /// Write a big-endian `u32`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if fewer than 4 bytes remain.
     #[inline]
     pub fn write_u32_be(&mut self, value: u32) -> Result<()> {
         self.write_bytes(&value.to_be_bytes())
     }
 
     /// Write a little-endian `u32`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if fewer than 4 bytes remain.
     #[inline]
     pub fn write_u32_le(&mut self, value: u32) -> Result<()> {
         self.write_bytes(&value.to_le_bytes())
     }
 
     /// Write a big-endian `u64`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if fewer than 8 bytes remain.
     #[inline]
     pub fn write_u64_be(&mut self, value: u64) -> Result<()> {
         self.write_bytes(&value.to_be_bytes())
     }
 
     /// Write a little-endian `u64`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if fewer than 8 bytes remain.
     #[inline]
     pub fn write_u64_le(&mut self, value: u64) -> Result<()> {
         self.write_bytes(&value.to_le_bytes())

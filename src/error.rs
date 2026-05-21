@@ -44,6 +44,9 @@ pub enum Error {
     /// A bit-level write requested more bits than the target type can hold,
     /// or a value did not fit in the requested bit width.
     BitOverflow,
+    /// A delimited-framer constructor was given an empty delimiter, which
+    /// cannot uniquely separate frames.
+    EmptyDelimiter,
 }
 
 impl fmt::Display for Error {
@@ -59,6 +62,7 @@ impl fmt::Display for Error {
             Error::DelimiterNotFound => f.write_str("delimiter not found in input"),
             Error::InvalidEncoding => f.write_str("encoded data violates a structural invariant"),
             Error::BitOverflow => f.write_str("bit width or value out of range"),
+            Error::EmptyDelimiter => f.write_str("delimiter must be non-empty"),
         }
     }
 }

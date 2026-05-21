@@ -1,0 +1,8 @@
+# REPS reproducibility requirement. Pinning the toolchain ensures that every
+# contributor and CI run uses the same compiler, regardless of their local
+# default. `stable` floats forward; combine with `rust-version = "1.75"` in
+# Cargo.toml to enforce the MSRV separately.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

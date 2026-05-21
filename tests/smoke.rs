@@ -74,7 +74,7 @@ fn record_round_trip_through_length_prefixed_framer() {
 
 #[test]
 fn delimited_stream_yields_consecutive_frames() {
-    let framer = Delimited::new(b"\n");
+    let framer = Delimited::new(b"\n").unwrap();
 
     let mut wire = [0u8; 64];
     let mut buf = WriteBuf::new(&mut wire);

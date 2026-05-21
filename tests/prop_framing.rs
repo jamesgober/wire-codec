@@ -102,7 +102,7 @@ proptest! {
         // Build a stable lifetime for `delim` by leaking it; tiny allocation
         // per case is acceptable for a property test.
         let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
-        let framer = Delimited::new(delim_static);
+        let framer = Delimited::new(delim_static).unwrap();
 
         let mut wire = vec![0u8; payload.len() + delim_static.len()];
         let mut buf = WriteBuf::new(&mut wire);
@@ -120,7 +120,7 @@ proptest! {
         bytes in proptest::collection::vec(any::<u8>(), 0..256),
     ) {
         let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
-        let framer = Delimited::new(delim_static).with_max_payload(128);
+        let framer = Delimited::new(delim_static).unwrap().with_max_payload(128);
         let _ = framer.next_frame(&bytes);
     }
 }

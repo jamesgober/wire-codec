@@ -1,0 +1,46 @@
+# cargo-deny configuration for wire-codec.
+#
+# See https://embarkstudios.github.io/cargo-deny/ for the schema and behavior.
+# Per REPS section "Dependency Management" this file enforces:
+#   - license policy
+#   - banned crates
+#   - duplicate version detection
+#   - source restrictions
+
+[advisories]
+# Run as part of `cargo deny check`. RustSec advisories that affect this crate's
+# dependency tree fail the build.
+yanked = "warn"
+ignore = []
+
+[licenses]
+# Allowed licenses for the runtime dependency tree.
+# wire-codec itself is `Apache-2.0 OR MIT`. Dev-deps may pull in others.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "0BSD",
+    "CC0-1.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+# Crates explicitly disallowed from the dependency tree. Empty by default.
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

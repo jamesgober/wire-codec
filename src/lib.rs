@@ -46,6 +46,8 @@
 #![doc(html_root_url = "https://docs.rs/wire-codec")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
+// REPS-mandated lint set. Keep aligned with REPS.md "Compiler & Lint Configuration".
+#![deny(warnings)]
 #![deny(missing_docs)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(unused_must_use)]
@@ -54,6 +56,7 @@
 #![deny(clippy::expect_used)]
 #![deny(clippy::todo)]
 #![deny(clippy::unimplemented)]
+#![deny(clippy::unreachable)]
 #![deny(clippy::print_stdout)]
 #![deny(clippy::print_stderr)]
 #![deny(clippy::dbg_macro)]

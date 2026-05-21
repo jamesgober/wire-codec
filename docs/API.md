@@ -11,7 +11,7 @@ the `std` feature only adds an `impl std::error::Error for Error`.
 
 ```toml
 [dependencies]
-wire-codec = "0.5"
+wire-codec = "0.9"
 ```
 
 ---
@@ -102,6 +102,7 @@ pub enum Error {
 | `DelimiterNotFound` | A delimiter byte sequence was not found within the configured search window. |
 | `InvalidEncoding` | Decoded bytes violated a structural invariant of the codec. |
 | `BitOverflow` | A bit-level call requested zero bits, more than [`MAX_BIT_WIDTH`](#max_bit_width), or a value that did not fit in the requested width. |
+| `EmptyDelimiter` | A delimited-framer constructor was given an empty delimiter. |
 
 `Error` implements `core::fmt::Display`. With the `std` feature it also
 implements `std::error::Error`.
@@ -545,7 +546,7 @@ assert_eq!(frame.consumed(), 7);
 pub struct Delimited<'d> { /* ... */ }
 
 impl<'d> Delimited<'d> {
-    pub const fn new(delimiter: &'d [u8]) -> Self;
+    pub const fn new(delimiter: &'d [u8]) -> Result<Self, Error>;
     pub const fn with_max_payload(self, max: usize) -> Self;
     pub const fn delimiter(&self) -> &'d [u8];
     pub const fn max_payload(&self) -> usize;
@@ -553,13 +554,13 @@ impl<'d> Delimited<'d> {
 ```
 
 Frames are separated by a byte sequence (one or more bytes). The delimiter is
-stripped from the emitted payload but counted toward `Frame::consumed`. The
-constructor panics on an empty delimiter; that case is a programmer error.
+stripped from the emitted payload but counted toward `Frame::consumed`. An
+empty delimiter yields `Error::EmptyDelimiter` rather than panicking.
 
 ```rust
 use wire_codec::framing::{Delimited, Framer};
 
-let framer = Delimited::new(b"\r\n");
+let framer = Delimited::new(b"\r\n").unwrap();
 let frame = framer.next_frame(b"GET /\r\nrest").unwrap().unwrap();
 assert_eq!(frame.payload(), b"GET /");
 assert_eq!(frame.consumed(), 7);
@@ -578,7 +579,7 @@ and returns `Error::FrameTooLarge` rather than scanning unbounded input.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ```
 
-Crate version string, populated at build time. Equal to `"0.5.0"` for this
+Crate version string, populated at build time. Equal to `"0.9.0"` for this
 release.
 
 ---
