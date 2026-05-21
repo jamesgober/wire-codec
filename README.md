@@ -8,10 +8,10 @@
 
 <p align="center">
     <a href="https://crates.io/crates/wire-codec"><img alt="crates.io" src="https://img.shields.io/crates/v/wire-codec.svg"></a>
+    <a href="https://crates.io/crates/wire-codec"><img alt="downloads" src="https://img.shields.io/crates/d/wire-codec.svg"></a>
     <a href="https://docs.rs/wire-codec"><img alt="docs.rs" src="https://docs.rs/wire-codec/badge.svg"></a>
     <a href="https://github.com/rust-lang/rfcs/blob/master/text/2495-min-rust-version.md" title="MSRV"><img alt="MSRV" src="https://img.shields.io/badge/MSRV-1.75%2B-blue"></a>
     <a href="https://github.com/jamesgober/wire-codec/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jamesgober/wire-codec/actions/workflows/ci.yml/badge.svg"></a>
-    <a href="https://github.com/jamesgober/wire-codec/blob/main/LICENSE-APACHE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue"></a>
 </p>
 
 <p align="center"><b>A runtime-agnostic toolkit for binary framing and codec composition.</b></p>
