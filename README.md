@@ -25,7 +25,7 @@ Binary frame codec and protocol codec toolkit. Length-prefixed, delimiter-based,
 
 ```toml
 [dependencies]
-wire-codec = "0.2"
+wire-codec = "0.5"
 ```
 
 ```rust
@@ -43,7 +43,21 @@ let frame = framer.next_frame(&out[..n]).unwrap().unwrap();
 assert_eq!(frame.payload(), b"ping");
 ```
 
-See [`docs/API.md`](docs/API.md) for the full API reference.
+See [`docs/API.md`](docs/API.md) for the full API reference. Runnable
+demonstrations live under [`examples/`](examples/):
+
+```sh
+cargo run --example length_prefixed_echo
+cargo run --example newline_protocol
+cargo run --example varint_record
+```
+
+Benchmarks are dependency-free manual harnesses:
+
+```sh
+cargo bench --bench codec
+cargo bench --bench framing
+```
 
 ---
 

@@ -11,7 +11,7 @@ the `std` feature only adds an `impl std::error::Error for Error`.
 
 ```toml
 [dependencies]
-wire-codec = "0.2"
+wire-codec = "0.5"
 ```
 
 ---
@@ -578,7 +578,7 @@ and returns `Error::FrameTooLarge` rather than scanning unbounded input.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ```
 
-Crate version string, populated at build time. Equal to `"0.2.0"` for this
+Crate version string, populated at build time. Equal to `"0.5.0"` for this
 release.
 
 ---
@@ -590,6 +590,34 @@ release.
 | `std`   | yes     | Adds `impl std::error::Error for Error`. Drop this feature to use the crate in `no_std` environments. |
 
 The crate has zero runtime dependencies.
+
+---
+
+## Testing and benchmarks
+
+The repository ships with:
+
+- **Unit tests** alongside each module (`src/**/tests`).
+- **Integration tests** in `tests/`:
+  - `smoke.rs` — minimal cross-module pipeline check.
+  - `integration_protocols.rs` — realistic protocol shapes (chunked
+    length-prefixed streams, newline and CR/LF text protocols, two-layer
+    framed binary records, back-pressure semantics).
+- **Property tests** (`proptest`) in `tests/prop_*.rs` covering varint
+  round-trip and panic-freedom on adversarial input, zigzag bijection,
+  framer round-trip across all `LengthWidth`/`Endian` combinations,
+  bitfield round-trip across arbitrary `(value, width)` sequences.
+- **Benchmarks** in `benches/`:
+  - `codec.rs` — varint, zigzag, and buffer-primitive throughput.
+  - `framing.rs` — length-prefixed and delimited framer cost.
+
+Run them with:
+
+```sh
+cargo test --all-features
+cargo bench --bench codec
+cargo bench --bench framing
+```
 
 ---
 

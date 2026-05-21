@@ -19,6 +19,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0] - 2026-05-21
+
+### Added
+
+- Property-test suite (`proptest`) covering varint round-trip, zigzag inverse,
+  framer round-trip, bitfield round-trip, and panic-freedom on arbitrary byte
+  input.
+- Integration test suite (`tests/integration_protocols.rs`) covering:
+  partial-delivery length-prefixed streams, newline-delimited line protocols,
+  HTTP-style CR/LF request parsing, two-layer length-prefixed + varint record
+  pipelines, and back-pressure semantics.
+- Bench harness with zero-dependency manual timing (`benches/codec.rs`,
+  `benches/framing.rs`). Reports nanoseconds per operation for the varint,
+  zigzag, buffer, and framing primitives.
+- Three runnable examples under `examples/`: `length_prefixed_echo`,
+  `newline_protocol`, `varint_record`.
+- `proptest = ">=1, <1.6"` as a dev-dependency (capped below 1.6 so the
+  `cargo test` build resolves on MSRV 1.75).
+- `.github` CI cache step updated to `actions/cache@v5` to retire the Node 20
+  deprecation warning.
+- `.gitattributes` pinning all text files to LF on checkout, so Windows CI
+  matches `rustfmt.toml`'s `newline_style = "Unix"`.
+
+### Changed
+
+- Documentation surface is unchanged; existing rustdoc covered the new
+  invariants without revision.
+
+### Fixed
+
+- `clippy.toml`: removed `allow-panic-in-tests`, `allow-dbg-in-tests`, and
+  `allow-print-in-tests` (added after MSRV 1.75); kept the two pre-1.75
+  options (`allow-unwrap-in-tests`, `allow-expect-in-tests`).
+- `varint::encoded_len_*` allow attributes now use
+  `#[allow(unknown_lints, clippy::manual_div_ceil)]` so older clippy releases
+  silently skip the unknown lint instead of failing.
+
+---
+
 ## [0.2.0] - 2026-05-21
 
 ### Added
@@ -50,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - REPS compliance baseline.
 - CI for Linux/macOS/Windows on stable and MSRV (1.75).
 
-[Unreleased]: https://github.com/jamesgober/wire-codec/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jamesgober/wire-codec/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jamesgober/wire-codec/compare/v0.2.0...v0.5.0
 [0.2.0]: https://github.com/jamesgober/wire-codec/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jamesgober/wire-codec/releases/tag/v0.1.0

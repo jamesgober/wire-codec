@@ -1,6 +1,6 @@
 ﻿[package]
 name = "wire-codec"
-version = "0.2.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.75"
 readme = "README.md"
@@ -44,6 +44,19 @@ std = []
 [dependencies]
 
 [dev-dependencies]
+# Pinned below 1.6 so the bench/test build resolves on MSRV 1.75.
+# proptest 1.6+ raises its own MSRV via transitive dependencies.
+proptest = { version = ">=1, <1.6", default-features = false, features = ["std"] }
+
+[[bench]]
+name = "codec"
+harness = false
+path = "benches/codec.rs"
+
+[[bench]]
+name = "framing"
+harness = false
+path = "benches/framing.rs"
 
 [profile.release]
 opt-level = 3
