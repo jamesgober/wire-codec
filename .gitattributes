@@ -1,0 +1,13 @@
+# Force LF line endings on checkout for all text files, regardless of
+# platform or local core.autocrlf settings. `cargo fmt` is configured with
+# `newline_style = "Unix"`, so any CRLF in the working tree causes fmt --check
+# to fail on Windows CI.
+* text=auto eol=lf
+
+# Explicit overrides for binary file types so Git doesn't try to normalize them.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

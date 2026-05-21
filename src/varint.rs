@@ -29,7 +29,9 @@ pub const MAX_LEN_U64: usize = 10;
 /// assert_eq!(varint::encoded_len_u32(u32::MAX), 5);
 /// ```
 #[inline]
-#[allow(clippy::manual_div_ceil)] // usize::div_ceil is not const-stable on MSRV 1.75.
+// Manual ceiling-divide. `usize::div_ceil` is not const-stable on MSRV 1.75.
+// `unknown_lints` shields older clippy releases that lack `manual_div_ceil`.
+#[allow(unknown_lints, clippy::manual_div_ceil)]
 pub const fn encoded_len_u32(value: u32) -> usize {
     let bits = (u32::BITS - value.leading_zeros()) as usize;
     if bits == 0 {
@@ -49,7 +51,9 @@ pub const fn encoded_len_u32(value: u32) -> usize {
 /// assert_eq!(varint::encoded_len_u64(u64::MAX), 10);
 /// ```
 #[inline]
-#[allow(clippy::manual_div_ceil)] // usize::div_ceil is not const-stable on MSRV 1.75.
+// Manual ceiling-divide. `usize::div_ceil` is not const-stable on MSRV 1.75.
+// `unknown_lints` shields older clippy releases that lack `manual_div_ceil`.
+#[allow(unknown_lints, clippy::manual_div_ceil)]
 pub const fn encoded_len_u64(value: u64) -> usize {
     let bits = (u64::BITS - value.leading_zeros()) as usize;
     if bits == 0 {
