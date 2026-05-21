@@ -11,8 +11,13 @@ the `std` feature only adds an `impl std::error::Error for Error`.
 
 ```toml
 [dependencies]
-wire-codec = "0.9"
+wire-codec = "1"
 ```
+
+The API surface is **stable as of 1.0.0**. New `Error` variants and new
+`LengthWidth` widths may appear in future minor releases (both enums are
+`#[non_exhaustive]`); existing types, traits, function signatures, and
+behaviour will not change without a major version bump.
 
 ---
 
@@ -53,6 +58,9 @@ wire-codec = "0.9"
 - [Crate constants](#crate-constants)
   - [`VERSION`](#version)
 - [Cargo features](#cargo-features)
+- [Testing and benchmarks](#testing-and-benchmarks)
+- [Cookbook](#cookbook)
+- [End-to-end example](#end-to-end-example)
 
 ---
 
@@ -579,7 +587,7 @@ and returns `Error::FrameTooLarge` rather than scanning unbounded input.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ```
 
-Crate version string, populated at build time. Equal to `"0.9.0"` for this
+Crate version string, populated at build time. Equal to `"1.0.0"` for this
 release.
 
 ---
@@ -618,6 +626,118 @@ Run them with:
 cargo test --all-features
 cargo bench --bench codec
 cargo bench --bench framing
+```
+
+---
+
+## Cookbook
+
+Short recipes for the most common shapes you will hit when building a binary
+protocol on top of `wire-codec`.
+
+### Append-only stream over a growing buffer
+
+When you control the input buffer (e.g. a `Vec<u8>` you are draining), the
+typical loop is: feed bytes in, read as many complete frames as you can, drop
+the consumed prefix, repeat.
+
+```rust
+use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
+
+let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+let mut buffer: Vec<u8> = Vec::new();
+
+# fn read_chunk_from_transport() -> Vec<u8> { vec![0x00, 0x05, b'h', b'e', b'l', b'l', b'o'] }
+buffer.extend_from_slice(&read_chunk_from_transport());
+
+let mut consumed = 0;
+while let Some(frame) = framer.next_frame(&buffer[consumed..]).unwrap() {
+    // process(frame.payload());
+    consumed += frame.consumed();
+}
+buffer.drain(..consumed);
+```
+
+### Fixed-output buffer (e.g. a stack-allocated MTU buffer)
+
+When you write into a buffer of known capacity, treat `BufferFull` as a
+back-pressure signal: stop encoding, flush downstream, then resume.
+
+```rust
+use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
+use wire_codec::{Error, WriteBuf};
+
+let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+let mut wire = [0u8; 1500]; // one Ethernet MTU
+let mut out = WriteBuf::new(&mut wire);
+
+for payload in [b"alpha".as_slice(), b"beta", b"gamma"] {
+    match framer.write_frame(payload, &mut out) {
+        Ok(()) => {}
+        Err(Error::BufferFull) => break, // flush wire[..out.position()] downstream
+        Err(e) => panic!("protocol error: {e}"),
+    }
+}
+```
+
+### Length-prefixed envelope around a structured record
+
+Combine `Encode` / `Decode` for the record shape with a framer for the
+on-the-wire envelope.
+
+```rust
+use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
+use wire_codec::{Decode, Encode, ReadBuf, Result, WriteBuf, varint};
+
+struct Greeting<'a> { id: u32, who: &'a [u8] }
+
+impl<'a> Encode for Greeting<'a> {
+    fn encoded_size(&self) -> usize {
+        varint::encoded_len_u32(self.id)
+            + varint::encoded_len_u64(self.who.len() as u64)
+            + self.who.len()
+    }
+    fn encode(&self, buf: &mut WriteBuf<'_>) -> Result<()> {
+        varint::encode_u32(self.id, buf)?;
+        varint::encode_u64(self.who.len() as u64, buf)?;
+        buf.write_bytes(self.who)
+    }
+}
+
+impl<'de> Decode<'de> for Greeting<'de> {
+    fn decode(buf: &mut ReadBuf<'de>) -> Result<Self> {
+        let id = varint::decode_u32(buf)?;
+        let len = varint::decode_u64(buf)? as usize;
+        let who = buf.read_bytes(len)?;
+        Ok(Self { id, who })
+    }
+}
+```
+
+### Hot-loop pattern: pre-sized output
+
+For high-throughput emit paths, ask the record for its `encoded_size()`,
+size a scratch buffer once, and reuse it across iterations. No allocation
+on the hot path.
+
+```rust,no_run
+# use wire_codec::{Encode, Result, WriteBuf};
+# struct Record;
+# impl Encode for Record {
+#   fn encoded_size(&self) -> usize { 0 }
+#   fn encode(&self, _b: &mut WriteBuf<'_>) -> Result<()> { Ok(()) }
+# }
+# let records: Vec<Record> = vec![];
+let max_size = records.iter().map(Encode::encoded_size).max().unwrap_or(0);
+let mut scratch = vec![0u8; max_size];
+
+for record in &records {
+    let mut out = WriteBuf::new(&mut scratch);
+    record.encode(&mut out)?;
+    let bytes = &scratch[..out.position()];
+    // emit(bytes);
+}
+# Ok::<(), wire_codec::Error>(())
 ```
 
 ---

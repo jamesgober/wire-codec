@@ -1,19 +1,40 @@
 //! # wire-codec
 //!
-//! Binary frame codec and protocol codec toolkit. Length-prefixed, delimiter-
-//! based, and custom framing strategies. Built-in varint, zigzag, and bitfield
-//! encoding. Runtime-agnostic foundation under network-protocol crates.
+//! A runtime-agnostic toolkit for binary framing and codec composition.
+//!
+//! `wire-codec` provides the primitives you need to build a binary protocol:
+//! zero-copy buffer cursors, variable-length integer codecs, bit-level
+//! cursors, and frame extraction strategies. It allocates nothing on the
+//! encode or decode path, depends on nothing at runtime, and compiles on
+//! `no_std` targets when the `std` feature is disabled.
+//!
+//! # When to reach for this crate
+//!
+//! Pick `wire-codec` when you need to:
+//!
+//! - Implement a custom binary protocol over any transport that delivers
+//!   contiguous byte slices (TCP, UDP, in-memory queue, shared memory,
+//!   serial link).
+//! - Frame a byte stream into discrete messages using a length prefix or
+//!   a delimiter, with bounded memory per frame.
+//! - Encode and decode integers compactly via LEB128 varint and zigzag.
+//! - Pack tagged fields into a record with bit-level precision.
+//!
+//! You probably want a higher-level serialization crate (`serde`, `prost`,
+//! `bincode`) if you need a derive macro, schema evolution, or
+//! introspection. This crate is the layer underneath.
 //!
 //! # Module map
 //!
-//! - [`buf`] holds [`ReadBuf`] and [`WriteBuf`], the zero-copy byte cursors
-//!   every other module is built on.
-//! - [`traits`] defines [`Encode`] and [`Decode`], the codec trait pair.
-//! - [`varint`] and [`zigzag`] provide variable-length integer primitives.
-//! - [`bitfield`] provides packed-bit read and write cursors.
-//! - [`framing`] supplies a [`Framer`][`framing::Framer`] trait plus
-//!   [`LengthPrefixed`][`framing::LengthPrefixed`] and
-//!   [`Delimited`][`framing::Delimited`] strategies.
+//! | Module | Provides |
+//! | ------ | -------- |
+//! | [`buf`] | [`ReadBuf`] and [`WriteBuf`], the zero-copy byte cursors every other module is built on. |
+//! | [`error`] | [`Error`] and [`Result`], the crate-wide error contract. |
+//! | [`traits`] | [`Encode`] and [`Decode`], the codec trait pair. |
+//! | [`varint`] | Unsigned LEB128 varint for `u32` and `u64`. |
+//! | [`zigzag`] | Signed-to-unsigned mapping for compact signed varints. |
+//! | [`bitfield`] | [`BitReader`] and [`BitWriter`] for MSB-first packed bits. |
+//! | [`framing`] | The [`Framer`][`framing::Framer`] trait plus [`LengthPrefixed`][`framing::LengthPrefixed`] and [`Delimited`][`framing::Delimited`] strategies. |
 //!
 //! # Example
 //!
@@ -34,10 +55,24 @@
 //! assert_eq!(frame.payload(), b"ping");
 //! ```
 //!
-//! # Status
+//! # Stability
 //!
-//! Pre-1.0 foundation. Public API surface defined in this release; further
-//! milestones expand implementations and lock semantics in.
+//! From `1.0.0` onward, the public API is frozen. Subsequent `1.x` releases
+//! add only bug fixes, performance improvements, and non-breaking additions:
+//!
+//! - New [`Error`] variants ([`Error`] is `#[non_exhaustive]`).
+//! - New [`framing::LengthWidth`] widths ([`framing::LengthWidth`] is
+//!   `#[non_exhaustive]`).
+//! - New methods on existing types.
+//! - Additional features behind feature flags.
+//!
+//! Any breaking change requires a `2.0` release.
+//!
+//! # Feature flags
+//!
+//! | Feature | Default | Effect |
+//! | ------- | ------- | ------ |
+//! | `std`   | yes     | Adds `impl std::error::Error for Error`. Drop this feature for `no_std` targets. |
 //!
 //! # License
 //!

@@ -19,6 +19,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2026-05-21
+
+### Added
+
+- Substantially expanded `README.md`: design rationale section, feature
+  list, four usage patterns (length-prefixed, delimited, varint + zigzag,
+  bit-packed records), reference performance table, stability statement,
+  feature-flag table, and project layout diagram.
+- Cookbook section in `docs/API.md` with four recipes: append-only stream
+  over a growing buffer, fixed-output buffer with `BufferFull`
+  back-pressure, length-prefixed envelope around a structured record, and
+  pre-sized-output hot-loop pattern.
+- Stability note in `docs/API.md` introducing the 1.0 freeze contract.
+- Crate-level rustdoc in `src/lib.rs` rewritten with a "When to reach for
+  this crate" section, module map table, stability section, and feature
+  flag table.
+- `docs/release/v1.0.0.md` with the locked benchmark baseline.
+
+### Changed
+
+- `README.md` corrects the edition claim (`2024` -> `2021`) and bumps the
+  dependency version pin to `"1"`.
+- `docs/API.md` `VERSION` reference updated to `"1.0.0"`.
+
+### Stability
+
+- Public API surface is now frozen. Subsequent `1.x` releases will be
+  additive: new `Error` variants, new `LengthWidth` variants, new methods
+  on existing types, new feature flags. Any breaking change requires a
+  `2.0` release.
+
+---
+
 ## [0.9.0] - 2026-05-21
 
 ### Added
@@ -133,7 +166,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - REPS compliance baseline.
 - CI for Linux/macOS/Windows on stable and MSRV (1.75).
 
-[Unreleased]: https://github.com/jamesgober/wire-codec/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/jamesgober/wire-codec/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jamesgober/wire-codec/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/jamesgober/wire-codec/compare/v0.5.0...v0.9.0
 [0.5.0]: https://github.com/jamesgober/wire-codec/compare/v0.2.0...v0.5.0
 [0.2.0]: https://github.com/jamesgober/wire-codec/compare/v0.1.0...v0.2.0
