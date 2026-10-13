@@ -152,6 +152,23 @@ impl<'d> Delimited<'d> {
     pub const fn max_payload(&self) -> usize {
         self.max_payload
     }
+
+    /// Whether `payload ++ delimiter` contains a delimiter that starts before
+    /// `payload.len()`, which would make the receiver cut the frame short.
+    fn would_split(&self, payload: &[u8]) -> bool {
+        let delim = self.delimiter;
+        if search::find(payload, delim, 0).is_some() {
+            return true;
+        }
+        // A match straddling the boundary has its first `k` bytes in the
+        // payload and the rest in the appended delimiter. That needs the
+        // payload to end with `delim[..k]` and the delimiter to have a border
+        // of length `m - k` (`delim[k..] == delim[..m - k]`). Delimiters
+        // without such a border, like `\n` or `\r\n`, never match here.
+        let m = delim.len();
+        (1..m.min(payload.len() + 1))
+            .any(|k| payload[payload.len() - k..] == delim[..k] && delim[k..] == delim[..m - k])
+    }
 }
 
 impl Framer for Delimited<'_> {
@@ -174,8 +191,11 @@ impl Framer for Delimited<'_> {
     /// # Errors
     ///
     /// - [`Error::FrameTooLarge`] if `payload` exceeds the configured limit.
-    /// - [`Error::DelimiterInPayload`] if `payload` contains the delimiter,
-    ///   because the receiver would split it into more than one frame.
+    /// - [`Error::DelimiterInPayload`] if the receiver would not read the
+    ///   payload back as a single frame: either `payload` contains the
+    ///   delimiter, or (for a self-overlapping delimiter such as `b"aa"`) the
+    ///   payload ends in a way that makes a delimiter appear earlier than
+    ///   intended (`b"a"` followed by `b"aa"` reads back as an empty frame).
     /// - [`Error::BufferFull`] if `out` cannot hold the payload and the
     ///   delimiter.
     ///
@@ -187,7 +207,7 @@ impl Framer for Delimited<'_> {
                 limit: self.max_payload,
             });
         }
-        if search::find(payload, self.delimiter, 0).is_some() {
+        if self.would_split(payload) {
             return Err(Error::DelimiterInPayload);
         }
         let total = payload
@@ -349,6 +369,38 @@ mod tests {
         let frame = framer.next_frame(&storage[..n]).unwrap().unwrap();
         assert_eq!(frame.payload(), b"a\rb\nc");
         assert_eq!(frame.consumed(), n);
+    }
+
+    #[test]
+    fn write_rejects_payloads_that_merge_with_a_self_overlapping_delimiter() {
+        let mut storage = [0u8; 16];
+        let cases: [(&[u8], &[u8], bool); 7] = [
+            (b"aa", b"a", true),   // "a" + "aa" reads back as ""
+            (b"aa", b"ba", true),  // "ba" + "aa" reads back as "b"
+            (b"aa", b"ab", false), // "ab" + "aa" reads back as "ab"
+            (b"aba", b"xab", true),
+            (b"aba", b"xa", false), // "xa" + "aba": first match at 2
+            (b"\r\n", b"x\r", false),
+            (b"abab", b"xab", true),
+        ];
+        for (delim, payload, rejected) in cases {
+            let framer = Delimited::new(delim).unwrap();
+            let mut buf = WriteBuf::new(&mut storage);
+            let result = framer.write_frame(payload, &mut buf);
+            if rejected {
+                assert_eq!(
+                    result,
+                    Err(Error::DelimiterInPayload),
+                    "{delim:?} {payload:?}"
+                );
+            } else {
+                result.unwrap();
+                let n = buf.position();
+                let frame = framer.next_frame(&storage[..n]).unwrap().unwrap();
+                assert_eq!(frame.payload(), payload, "{delim:?}");
+                assert_eq!(frame.consumed(), n);
+            }
+        }
     }
 
     #[test]
