@@ -46,7 +46,7 @@ impl<'a> BitReader<'a> {
     /// Number of bits still available to read.
     #[inline]
     pub const fn bits_remaining(&self) -> usize {
-        (self.bytes.len() * 8) - self.bit_pos
+        bit_capacity(self.bytes.len()) - self.bit_pos
     }
 
     /// Advance the cursor to the next byte boundary.
@@ -55,6 +55,9 @@ impl<'a> BitReader<'a> {
     /// bits are discarded without being inspected.
     #[inline]
     pub fn align_to_byte(&mut self) {
+        // `bit_pos <= bit_capacity(..)`, which is a multiple of 8 no larger
+        // than `usize::MAX - 7`, so the addition cannot overflow and the
+        // result never passes the end of the input.
         self.bit_pos = (self.bit_pos + 7) & !7;
     }
 
@@ -135,15 +138,15 @@ impl<'a> BitWriter<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::BufferFull`] if rounding up would exceed the backing
-    /// slice.
+    /// Never fails in practice: a partially written byte always lies inside
+    /// the backing slice, so rounding up to its end cannot run out of room.
+    /// The `Result` return type is kept for API stability.
     pub fn align_to_byte(&mut self) -> Result<()> {
-        let aligned = (self.bit_pos + 7) & !7;
-        if aligned > self.bytes.len() * 8 {
-            return Err(Error::BufferFull);
-        }
         self.zero_trailing_bits();
-        self.bit_pos = aligned;
+        // `bit_pos <= bit_capacity(..)`, a multiple of 8 no larger than
+        // `usize::MAX - 7`: the addition cannot overflow and the rounded
+        // position cannot pass the end of the slice.
+        self.bit_pos = (self.bit_pos + 7) & !7;
         Ok(())
     }
 
@@ -171,7 +174,7 @@ impl<'a> BitWriter<'a> {
         if n < 64 && (value >> n) != 0 {
             return Err(Error::BitOverflow);
         }
-        if (n as usize) > self.bytes.len() * 8 - self.bit_pos {
+        if (n as usize) > bit_capacity(self.bytes.len()) - self.bit_pos {
             return Err(Error::BufferFull);
         }
         let mut bits_left = n;
@@ -202,6 +205,19 @@ impl<'a> BitWriter<'a> {
         self.zero_trailing_bits();
         self.bit_pos.div_ceil(8)
     }
+}
+
+/// Number of addressable bits in a slice of `len` bytes.
+///
+/// Saturates so that `len * 8` cannot overflow on 32-bit targets: slices
+/// larger than `usize::MAX / 8` bytes expose only their first
+/// `usize::MAX / 8` bytes to the bit cursors. The result is always a
+/// multiple of 8 and at most `usize::MAX - 7`.
+#[inline]
+const fn bit_capacity(len: usize) -> usize {
+    let max_bytes = usize::MAX / 8;
+    let bytes = if len < max_bytes { len } else { max_bytes };
+    bytes * 8
 }
 
 #[cfg(test)]
@@ -279,6 +295,14 @@ mod tests {
         r.align_to_byte();
         assert_eq!(r.bits_consumed(), 16, "align at end of input stays put");
         assert_eq!(r.read_bits(1), Err(Error::UnexpectedEof));
+    }
+
+    #[test]
+    fn bit_capacity_saturates() {
+        assert_eq!(bit_capacity(0), 0);
+        assert_eq!(bit_capacity(3), 24);
+        assert_eq!(bit_capacity(usize::MAX), (usize::MAX / 8) * 8);
+        assert_eq!(bit_capacity(usize::MAX) % 8, 0);
     }
 
     #[test]
