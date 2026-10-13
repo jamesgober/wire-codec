@@ -5,7 +5,8 @@
 //! `wire-codec` provides the primitives you need to build a binary protocol:
 //! zero-copy buffer cursors, variable-length integer codecs, bit-level
 //! cursors, bit-packed structs, checksums, byte stuffing, and frame
-//! extraction strategies. It allocates nothing on the encode or decode path,
+//! extraction strategies. Its core allocates nothing on the encode or decode
+//! path (only the optional `codec` adapters grow a `bytes::BytesMut`), it
 //! has no required runtime dependencies, and compiles on `no_std` targets
 //! when the default `std` feature is disabled.
 //!
@@ -67,13 +68,26 @@
 //!
 //! # Error contract
 //!
-//! Every fallible operation returns [`Result`] and is atomic: on error the
-//! cursor it was given has not moved and nothing was written. Malformed or
-//! hostile input never causes a panic, including on 32-bit targets, where
-//! every length taken from the wire is converted with checked arithmetic.
-//! The only assertion in the crate is a `debug_assert!` in
-//! [`Frame::new`][`framing::Frame::new`] that catches a custom framer
-//! reporting fewer consumed bytes than its payload.
+//! Every fallible operation returns [`Result`] and leaves the cursor it was
+//! given at its original position on error. The crate's own writers
+//! ([`WriteBuf`] methods, varint encoders, every built-in framer's
+//! `write_frame`, [`cobs`], and [`packed_struct!`] encoding) also check
+//! room and validity before writing, so on error nothing past the cursor is
+//! modified either. Composites that run other code can still leave bytes
+//! behind the restored cursor: a tuple whose later element fails for a
+//! reason other than lack of room, and
+//! [`Checksummed`][`framing::Checksummed`] around a custom framer that
+//! reports no [`max_frame_len`][`framing::Framer::max_frame_len`].
+//!
+//! Malformed or hostile input never causes a panic, including on 32-bit
+//! targets, where every length taken from the wire is converted with
+//! checked arithmetic. The only runtime assertion reachable through the
+//! public API is a `debug_assert!` in [`Frame::new`][`framing::Frame::new`]
+//! that catches a custom framer reporting fewer consumed bytes than its
+//! payload. The other assertions are internal invariant checks
+//! (`debug_assert!`s in crate-private cursor helpers) and compile-time
+//! checks (the checksum width in `Checksummed::new` and the field widths in
+//! `packed_struct!`).
 //!
 //! # Stability
 //!

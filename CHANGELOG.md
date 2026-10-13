@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.0] — 2026-10-13
 
-Hardening and framing release. Fixes every finding of the 2026-10 audit,
-including a remote panic on 32-bit targets, and adds the framers, codecs,
-and adapters the 1.0 roadmap listed as post-1.0 work. No breaking API
+Hardening and framing release. Fixes every correctness, security, and
+documentation finding of the 2026-10 audit, including a remote panic on
+32-bit targets (items kept or deferred are listed in
+`docs/release/v1.1.0.md`), and adds the framers, codecs, and adapters the
+1.0 roadmap listed as post-1.0 work. No breaking API
 changes; see "Changed" for the MSRV raise and the behaviour fixes.
 
 ### Added
@@ -35,7 +37,10 @@ changes; see "Changed" for the MSRV raise and the behaviour fixes.
   `Decode`, plus `pack` / `unpack` and `BITS` / `SIZE` constants.
 - `framing::StreamDecoder<F>` and the provided trait method
   `Framer::next_frame_from`: resumable frame extraction for streaming input.
-  `Delimited` resumes its search where the previous call stopped.
+  `Delimited` resumes its search where the previous call stopped. The
+  progress is cleared automatically when decoding fails, and
+  `StreamDecoder::reset` / `FrameCodec::reset` clear it when the caller
+  discards or replaces buffered input.
 - Provided trait method `Framer::max_frame_len` (upper bound on the bytes
   `write_frame` writes); implemented by every built-in framer.
 - `LengthWidth::U24` and `LengthWidth::U64`.
@@ -78,9 +83,11 @@ changes; see "Changed" for the MSRV raise and the behaviour fixes.
 ### Changed
 
 - **MSRV raised from 1.75 to 1.85, edition 2021 to 2024.** This enables
-  `core::error::Error` on `no_std`, the MSRV-aware resolver, and current
-  dev-dependencies. Users on older compilers can stay on `~1.0`. The MSRV is
-  only ever raised in a minor release.
+  `core::error::Error` on `no_std` and current dev-dependencies. Users on
+  older compilers should pin `~1.0`: only projects using MSRV-aware
+  resolution (Cargo 1.84+ with `resolver = "3"` or
+  `incompatible-rust-versions = "fallback"`) skip 1.1 automatically. The
+  MSRV is only ever raised in a minor release.
 - `Error` now implements `core::error::Error` unconditionally (previously
   `std::error::Error` only with the `std` feature; it is the same trait).
 - `Delimited::write_frame` rejects a payload that the receiver would not
@@ -88,10 +95,10 @@ changes; see "Changed" for the MSRV raise and the behaviour fixes.
   merges with a self-overlapping delimiter) with
   `Error::DelimiterInPayload`. 1.0 wrote such frames silently, and the peer
   split them.
-- Every write is now atomic: `varint::encode_*`, `LengthPrefixed`,
-  `Delimited`, and `Checksummed` `write_frame` leave the cursor where it was
-  on error. Varint decoding is atomic too (1.0 advanced the cursor past the
-  bytes it had read before failing).
+- Writes are atomic: `varint::encode_*` and every built-in framer's
+  `write_frame` check room before writing, so on error the cursor is where
+  it was and nothing was written. Varint decoding is atomic too (1.0
+  advanced the cursor past the bytes it had read before failing).
 - `Delimited` searches with a SWAR first-byte scan (about 60x faster on a
   1 KiB line) instead of a byte-by-byte slice compare.
 - `FrameTooLarge.len` from `Delimited::next_frame` is `max_payload + 1`, a

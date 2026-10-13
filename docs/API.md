@@ -97,13 +97,21 @@ A typical pipeline is:
    `T::decode(&mut ReadBuf::new(frame.payload()))` to deserialize.
 
 **Atomic operations.** Every fallible call in the crate leaves its cursor
-unchanged on error, and writes nothing. A streaming reader that gets
-`Error::UnexpectedEof` can append bytes and retry the same call.
+at its original position on error. A streaming reader that gets
+`Error::UnexpectedEof` can append bytes and retry the same call. The
+crate's own writers (`WriteBuf` methods, varint encoders, every built-in
+framer's `write_frame`, `cobs`, and `packed_struct!` encoding) check room
+and validity first, so on error they also leave the bytes past the cursor
+untouched. Two composites can leave bytes behind the restored cursor: a
+tuple whose later element fails for a reason other than lack of room, and
+`Checksummed` around a custom framer that reports no `max_frame_len`.
 
 **No panics on input.** Malformed or hostile bytes never cause a panic.
 Lengths read from the wire are converted with checked arithmetic, including
-on 32-bit targets. The one assertion in the crate is a `debug_assert!` in
-`Frame::new` for custom framers that break the `Frame` contract.
+on 32-bit targets. The only runtime assertion reachable through the public
+API is a `debug_assert!` in `Frame::new` for custom framers that break the
+`Frame` contract; the remaining assertions are internal invariant checks
+and compile-time width checks (`Checksummed::new`, `packed_struct!`).
 
 ---
 
@@ -132,7 +140,7 @@ pub enum Error {
 | Variant | Meaning | Typical response |
 | ------- | ------- | ---------------- |
 | `UnexpectedEof` | Reader ran out of bytes before the value completed. | Wait for more input and retry; or the message is truncated. |
-| `BufferFull` | Writer ran out of capacity. Nothing was written. | Flush or grow the output, then retry. |
+| `BufferFull` | Writer ran out of capacity. The cursor did not move; the crate's own writers wrote nothing. | Flush or grow the output, then retry. |
 | `VarintOverflow` | A varint ran past its maximum length or its value does not fit the target type. | Hostile or corrupt input. |
 | `FrameTooLarge { len, limit }` | A frame's payload length exceeds the framer's limit. For delimited framing `len` is a lower bound. Both fields saturate at `usize::MAX`. | Hostile input on decode; oversized payload on encode. |
 | `InvalidLengthPrefix` | A length prefix adjusts to a negative length, or a payload cannot be represented under the configured length adjustment. | Hostile or corrupt input. |
@@ -782,7 +790,8 @@ impl<F: Framer> StreamDecoder<F> {
 ```
 
 Owns the `next_frame_from` hint so a growing buffer is searched in linear
-time overall.
+time overall. The hint is cleared automatically when `decode` returns an
+error; call `reset` when you discard or replace buffered input otherwise.
 
 ```rust
 use wire_codec::framing::{Delimited, StreamDecoder};
@@ -1045,8 +1054,12 @@ Consistent Overhead Byte Stuffing removes every `0x00` from a payload so a
 zero byte can delimit frames. Pair it with `Delimited` on `[0x00]`.
 `encode` never writes more than `max_encoded_len` bytes and never emits a
 trailing empty block. Decoding rejects empty input, embedded zeros, and
-code bytes that run past the block with `InvalidEncoding`. Encode and decode
-into a `WriteBuf` are atomic.
+code bytes that run past the block with `InvalidEncoding`. `encode` and `decode`
+check room (and `decode` validates the whole block) before writing, so they
+write nothing on error; `decode_in_place` validates before rewriting and
+leaves its input unchanged on error. Like the reference decoder, `decode`
+accepts both encodings of a payload ending in a full 254-byte run (with or
+without a trailing `0x01` block); `encode` only produces the shorter one.
 
 ```rust
 use wire_codec::{cobs, WriteBuf};
@@ -1075,6 +1088,7 @@ impl<F: Framer> FrameCodec<F> {
     pub const fn new(framer: F) -> Self;
     pub const fn framer(&self) -> &F;
     pub fn into_inner(self) -> F;
+    pub fn reset(&mut self);
     pub fn decode_frame(&mut self, src: &mut BytesMut) -> Result<Option<BytesMut>>;
     pub fn decode_frame_eof(&mut self, src: &mut BytesMut) -> Result<Option<BytesMut>>;
     pub fn encode_frame(&mut self, payload: &[u8], dst: &mut BytesMut) -> Result<()>;
@@ -1082,7 +1096,9 @@ impl<F: Framer> FrameCodec<F> {
 ```
 
 `decode_frame` splits the payload off the buffer without copying and keeps
-the resumable-scan state. `encode_frame` reserves `max_frame_len` bytes in
+the resumable-scan state. That state assumes the buffer only grows at the
+back between calls: call `reset` after clearing, truncating, or replacing
+it (decode errors clear it automatically). `encode_frame` reserves `max_frame_len` bytes in
 one step. Both leave the buffer untouched on error.
 
 With `tokio-util`: `tokio_util::codec::Decoder` (`Item = BytesMut`) and

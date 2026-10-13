@@ -6,10 +6,12 @@
 //!
 //! # Cursor state on error
 //!
-//! Every read, write, encode, decode, and frame operation in this crate is
-//! atomic: when it returns `Err`, the [`ReadBuf`][`crate::ReadBuf`] or
-//! [`WriteBuf`][`crate::WriteBuf`] it was given is left at the position it
-//! had before the call. Use [`ReadBuf::position`][`crate::ReadBuf::position`]
+//! Every read, write, encode, decode, and frame operation in this crate
+//! leaves the [`ReadBuf`][`crate::ReadBuf`] or
+//! [`WriteBuf`][`crate::WriteBuf`] it was given at the position it had
+//! before the call when it returns `Err`. See the crate-level "Error
+//! contract" for which writers also leave the bytes past the cursor
+//! untouched. Use [`ReadBuf::position`][`crate::ReadBuf::position`]
 //! to report where in the input a failure occurred.
 
 use core::fmt;
@@ -53,7 +55,10 @@ pub enum Error {
     UnexpectedEof,
     /// Writer ran out of capacity before the requested value could be encoded.
     ///
-    /// Flush or grow the output buffer and retry. Nothing was written.
+    /// Flush or grow the output buffer and retry. The cursor did not move,
+    /// and the crate's own writers check room before writing, so they leave
+    /// the buffer untouched (see the crate-level error contract for the
+    /// composite exceptions).
     BufferFull,
     /// A varint exceeded the maximum encoded length for its target width, or
     /// its value does not fit in the target type.

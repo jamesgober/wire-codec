@@ -19,9 +19,9 @@
 <p align="center">
 Zero-copy buffer cursors, LEB128 varint and zigzag integer codecs, MSB-first
 bit cursors and bit-packed structs, CRC checksums, COBS byte stuffing, and
-length-prefixed, varint-prefixed, and delimited frame extraction — all
-allocation-free, all <code>no_std</code>-capable, all behind a small,
-stable API.
+length-prefixed, varint-prefixed, and delimited frame extraction — an
+allocation-free, <code>no_std</code>-capable core behind a small, stable
+API.
 </p>
 
 ---
@@ -36,8 +36,9 @@ specific serialization model (`serde`, `prost`), or a buffer abstraction
 (`bytes::Bytes`, `Vec<u8>`) that propagates outward through your code.
 
 `wire-codec` does not. It works on borrowed byte slices: you bring the buffer,
-it provides the cursors, the codecs, and the framers. Nothing allocates on
-the encode or decode path. Nothing pulls in an async runtime. Nothing forces
+it provides the cursors, the codecs, and the framers. Nothing in the core
+allocates on the encode or decode path (the optional `BytesMut` adapters
+grow their buffer, by design). Nothing pulls in an async runtime. Nothing forces
 a `serde`-style data model. You can drop it into an embedded firmware build,
 a WebAssembly module, a kernel-bypass network stack, or a synchronous CLI
 tool, and the public API is exactly the same. When you do live in Tokio or
@@ -394,7 +395,7 @@ benchmark target.
 | `StreamDecoder<Delimited>`, 64 KiB line fed 1 byte per call | 155 µs total |
 | `checksum::crc32` / `crc32c` (1 KiB)                   | 0.33 µs (~3 GB/s) |
 | `checksum::crc16_ccitt_false` (1 KiB)                  | 1.85 µs         |
-| `cobs::encode` / `cobs::decode` (1 KiB)                | 0.64 / 0.54 µs  |
+| `cobs::encode` / `cobs::decode` (1 KiB)                | 0.60 / 0.72 µs  |
 
 Numbers are the minimum of four runs. For comparison, 1.0 scanned a 1 KiB
 line in about 1.8 µs and spent about 430 ms on the 64 KiB slow-drip case,
@@ -431,9 +432,13 @@ Any breaking change requires a `2.0.0` release. The crate follows
 **MSRV policy.** The minimum supported Rust version is 1.85. It is raised
 only in a MINOR release, with the change called out in the changelog, and
 never in a PATCH release. Users pinned to an older compiler can stay on the
-previous minor line (`wire-codec = "~1.0"` for Rust 1.75). The edition 2024
-resolver honours `rust-version`, so `cargo update` will not pick a release
-your toolchain cannot build.
+previous minor line by depending on `wire-codec = "~1.0"` (1.0 supports
+Rust 1.75). Cargo only skips releases your compiler cannot build when your
+own project uses MSRV-aware resolution, which needs Cargo 1.84 or newer
+with `resolver = "3"` (the edition 2024 default) or
+`incompatible-rust-versions = "fallback"`. On older Cargo, a plain
+`wire-codec = "1"` resolves to 1.1 and fails to build with a
+`rustc 1.85` requirement error, so pin `~1.0` there.
 
 ---
 

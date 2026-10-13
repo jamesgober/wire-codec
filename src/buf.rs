@@ -7,7 +7,7 @@
 //!
 //! Both cursors are `no_std`-compatible and allocation-free. Every fallible
 //! method is atomic: on error the position is unchanged and, for
-//! [`WriteBuf`], nothing is written.
+//! [`WriteBuf`], no byte of the backing slice is modified.
 
 use crate::error::{Error, Result};
 
