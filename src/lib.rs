@@ -97,6 +97,8 @@
 #![deny(clippy::dbg_macro)]
 #![deny(clippy::undocumented_unsafe_blocks)]
 #![deny(clippy::missing_safety_doc)]
+// The crate contains no `unsafe` code; `forbid` makes that machine-checked.
+#![forbid(unsafe_code)]
 
 pub mod bitfield;
 pub mod buf;
