@@ -80,7 +80,9 @@
 
 #![doc(html_root_url = "https://docs.rs/wire-codec")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(not(feature = "std"), no_std)]
+// Unit tests always link `std` (for `Vec`, `String`, formatting); the library
+// itself is `no_std` whenever the `std` feature is off.
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
 // REPS-mandated lint set. Keep aligned with REPS.md "Compiler & Lint Configuration".
 #![deny(warnings)]
 #![deny(missing_docs)]
