@@ -29,6 +29,9 @@ fn find_in(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[inline]
 fn find_in(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     let (&first, rest) = needle.split_first()?;
+    if rest.is_empty() {
+        return find_byte(first, haystack);
+    }
     // Last offset at which a full needle still fits.
     let last_start = haystack.len().checked_sub(needle.len())?;
     let mut from = 0;
