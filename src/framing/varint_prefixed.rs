@@ -273,6 +273,16 @@ mod tests {
     }
 
     #[test]
+    fn accessors() {
+        let framer = VarintPrefixed::new()
+            .with_max_payload(5)
+            .with_canonical(false);
+        assert_eq!(framer.max_payload(), 5);
+        assert!(!framer.is_canonical());
+        assert!(VarintPrefixed::new().is_canonical());
+    }
+
+    #[test]
     fn default_matches_new() {
         assert_eq!(VarintPrefixed::default(), VarintPrefixed::new());
         assert_eq!(VarintPrefixed::new().max_frame_len(usize::MAX), None);

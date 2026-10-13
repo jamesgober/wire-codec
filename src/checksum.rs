@@ -314,6 +314,16 @@ mod tests {
     }
 
     #[test]
+    fn tables_rebuilt_at_runtime_match_the_statics() {
+        // The table builders are `const fn` and normally run at compile
+        // time; calling them at runtime checks them (and covers them).
+        assert_eq!(crc16_table(0x1021), CRC16_CCITT_TABLE);
+        assert_eq!(slice_by_8(reflected_crc32_table(0xEDB8_8320)), CRC32_TABLE);
+        assert_eq!(slice_by_8(reflected_crc32_table(0x82F6_3B78)), CRC32C_TABLE);
+        assert_eq!(CRC32_TABLE[0][1], 0x7707_3096);
+    }
+
+    #[test]
     fn trait_impls_report_width() {
         assert_eq!(Crc16CcittFalse::LEN, 2);
         assert_eq!(Crc32::LEN, 4);
