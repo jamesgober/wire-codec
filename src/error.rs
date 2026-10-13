@@ -86,7 +86,8 @@ pub enum Error {
     /// Decoded data violated a structural invariant required by the codec.
     ///
     /// Produced by the canonical varint decoders and the varint-prefixed
-    /// framer for overlong encodings. The input is corrupt or hostile.
+    /// framer for overlong encodings, and by [`cobs`][`crate::cobs`]
+    /// decoding for malformed blocks. The input is corrupt or hostile.
     InvalidEncoding,
     /// A bit-level write requested more bits than the target type can hold,
     /// or a value did not fit in the requested bit width.
@@ -97,8 +98,8 @@ pub enum Error {
     /// A payload passed to a delimited framer's `write_frame` contains the
     /// delimiter sequence, so the receiver would split it into several frames.
     ///
-    /// Escape the payload or switch to a length-prefixed framer. Nothing was
-    /// written.
+    /// Escape the payload (for example with [`cobs`][`crate::cobs`]) or switch
+    /// to a length-prefixed framer. Nothing was written.
     DelimiterInPayload,
     /// A frame's checksum trailer did not match the checksum computed over
     /// the received bytes.

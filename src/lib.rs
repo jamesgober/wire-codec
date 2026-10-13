@@ -105,6 +105,7 @@
 pub mod bitfield;
 pub mod buf;
 pub mod checksum;
+pub mod cobs;
 pub mod error;
 pub mod framing;
 pub mod traits;
