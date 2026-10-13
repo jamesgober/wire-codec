@@ -80,6 +80,38 @@ impl<F: Framer> FrameCodec<F> {
         self.decoder.into_inner()
     }
 
+    /// Forget the partial-scan progress kept between
+    /// [`FrameCodec::decode_frame`] calls.
+    ///
+    /// The codec assumes the receive buffer only grows at the back between
+    /// calls, apart from the frames it splits off itself. Call `reset` when
+    /// you clear, truncate, or replace the buffer (for example to
+    /// resynchronise, after `Framed::from_parts` with a fresh read buffer, or
+    /// when reusing the codec for a new connection). Progress is also cleared
+    /// automatically whenever decoding returns an error.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bytes::BytesMut;
+    /// use wire_codec::codec::FrameCodec;
+    /// use wire_codec::framing::Delimited;
+    ///
+    /// let mut codec = FrameCodec::new(Delimited::bounded(b"\n").unwrap());
+    /// let mut src = BytesMut::from(&b"partial line"[..]);
+    /// assert_eq!(codec.decode_frame(&mut src).unwrap(), None);
+    ///
+    /// // Switch to a different stream: drop the buffer and the progress.
+    /// src.clear();
+    /// codec.reset();
+    /// src.extend_from_slice(b"a\nb\n");
+    /// assert_eq!(&codec.decode_frame(&mut src).unwrap().unwrap()[..], b"a");
+    /// ```
+    #[inline]
+    pub fn reset(&mut self) {
+        self.decoder.reset();
+    }
+
     /// Remove the next complete frame from the front of `src` and return its
     /// payload, or `Ok(None)` if `src` does not hold a full frame yet.
     ///
@@ -88,7 +120,8 @@ impl<F: Framer> FrameCodec<F> {
     /// Propagates the framer's errors. Returns [`Error::InvalidEncoding`] if
     /// a custom framer violates the [`Frame`][`crate::framing::Frame`]
     /// contract (zero bytes consumed, or more than the input). `src` is left
-    /// untouched on error.
+    /// untouched on error, and the scan progress is cleared so the caller
+    /// may discard the buffer and resynchronise.
     pub fn decode_frame(&mut self, src: &mut BytesMut) -> Result<Option<BytesMut>> {
         let (consumed, payload_at) = match self.decoder.decode(src)? {
             None => return Ok(None),
@@ -351,6 +384,40 @@ mod tests {
         }
         assert_eq!(lines, [b"GET /".to_vec(), b"Host: x".to_vec(), Vec::new()]);
         assert_eq!(codec.framer().delimiter(), b"\r\n");
+    }
+
+    #[test]
+    fn resynchronising_after_an_error_does_not_merge_lines() {
+        // Regression test for WC2-001, the verifier's scenario: an over-long
+        // line, then the caller clears the buffer and feeds fresh lines.
+        let framer = Delimited::new(b"\n").unwrap().with_max_payload(8);
+        let mut codec = FrameCodec::new(framer);
+        let mut src = BytesMut::from(&b"aaaaaaa"[..]);
+        assert_eq!(codec.decode_frame(&mut src).unwrap(), None);
+        src.extend_from_slice(b"aaaaa");
+        assert!(codec.decode_frame(&mut src).is_err());
+        src.clear();
+        src.extend_from_slice(b"hi\nthere\n");
+        assert_eq!(&codec.decode_frame(&mut src).unwrap().unwrap()[..], b"hi");
+        assert_eq!(
+            &codec.decode_frame(&mut src).unwrap().unwrap()[..],
+            b"there"
+        );
+        assert!(src.is_empty());
+    }
+
+    #[test]
+    fn reset_after_swapping_the_buffer() {
+        let mut codec = FrameCodec::new(Delimited::bounded(b"\n").unwrap());
+        let mut old = BytesMut::from(&b"0123456789"[..]);
+        assert_eq!(codec.decode_frame(&mut old).unwrap(), None);
+        codec.reset();
+        let mut fresh = BytesMut::from(&b"x\nyyyyyy\n"[..]);
+        assert_eq!(&codec.decode_frame(&mut fresh).unwrap().unwrap()[..], b"x");
+        assert_eq!(
+            &codec.decode_frame(&mut fresh).unwrap().unwrap()[..],
+            b"yyyyyy"
+        );
     }
 
     #[test]

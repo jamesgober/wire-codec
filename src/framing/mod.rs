@@ -153,6 +153,10 @@ pub trait Framer {
     /// how far it got on `Ok(None)` and continues from there next time, which
     /// turns a byte-at-a-time stream from quadratic into linear work.
     ///
+    /// If the buffered input is discarded or replaced (for example after an
+    /// error), set `scanned` back to `0`; a stale hint would make the framer
+    /// skip bytes it has never examined.
+    ///
     /// The default implementation ignores the hint and calls
     /// [`Framer::next_frame`], which is optimal for framers that read a
     /// fixed-position header. [`StreamDecoder`] manages the hint for you.
@@ -258,12 +262,18 @@ impl<F: Framer> StreamDecoder<F> {
     ///
     /// # Errors
     ///
-    /// Propagates the wrapped framer's errors. After an error the stream is
-    /// usually unrecoverable; call [`StreamDecoder::reset`] before reusing
-    /// the decoder on a new stream.
+    /// Propagates the wrapped framer's errors. The scan progress is cleared
+    /// on error, because the usual response (discarding the buffered input
+    /// and resynchronising) breaks the append-only contract the progress
+    /// hint relies on. Call [`StreamDecoder::reset`] yourself whenever you
+    /// discard or replace buffered input without an error.
     #[inline]
     pub fn decode<'a>(&mut self, input: &'a [u8]) -> Result<Option<Frame<'a>>> {
-        self.framer.next_frame_from(input, &mut self.scanned)
+        let result = self.framer.next_frame_from(input, &mut self.scanned);
+        if result.is_err() {
+            self.scanned = 0;
+        }
+        result
     }
 
     /// Forget any partial-scan progress, for example after discarding the
@@ -333,6 +343,20 @@ mod tests {
             FixedFour.write_frame(b"w", &mut buf),
             Err(Error::InvalidEncoding)
         );
+    }
+
+    #[test]
+    fn stream_decoder_clears_progress_on_error() {
+        // Regression test (WC2-001): a stale hint after an error made the
+        // decoder skip the delimiter of the next, unrelated input.
+        let framer = Delimited::new(b"\n").unwrap().with_max_payload(8);
+        let mut decoder = StreamDecoder::new(framer);
+        assert_eq!(decoder.decode(b"aaaaaaa").unwrap(), None);
+        assert_eq!(decoder.scanned, 7);
+        assert!(decoder.decode(b"aaaaaaaaaaaa").is_err());
+        assert_eq!(decoder.scanned, 0);
+        let frame = decoder.decode(b"hi\nthere\n").unwrap().unwrap();
+        assert_eq!(frame.payload(), b"hi");
     }
 
     #[test]
