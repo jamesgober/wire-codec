@@ -5,8 +5,8 @@
 </h1>
 
 `wire-codec` is a runtime-agnostic binary frame and codec toolkit. Every public
-item is listed below with its signature, behaviour, and a runnable example.
-Signature listings are marked `rust,ignore`; every other code block in this
+item is listed below with its signature and behaviour, with runnable examples
+for each type, trait, and function group. Signature listings are marked `rust,ignore`; every other code block in this
 file is compiled and run as a doctest (`cargo test --doc`), so the examples
 cannot drift from the code.
 
@@ -100,8 +100,10 @@ A typical pipeline is:
 unchanged on error, and writes nothing. A streaming reader that gets
 `Error::UnexpectedEof` can append bytes and retry the same call.
 
-**No panics.** No public function panics on any input. Lengths read from the
-wire are converted with checked arithmetic, including on 32-bit targets.
+**No panics on input.** Malformed or hostile bytes never cause a panic.
+Lengths read from the wire are converted with checked arithmetic, including
+on 32-bit targets. The one assertion in the crate is a `debug_assert!` in
+`Frame::new` for custom framers that break the `Frame` contract.
 
 ---
 

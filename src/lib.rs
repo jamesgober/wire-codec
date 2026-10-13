@@ -68,9 +68,12 @@
 //! # Error contract
 //!
 //! Every fallible operation returns [`Result`] and is atomic: on error the
-//! cursor it was given has not moved and nothing was written. No public
-//! function panics on any input, including on 32-bit targets, where every
-//! length taken from the wire is converted with checked arithmetic.
+//! cursor it was given has not moved and nothing was written. Malformed or
+//! hostile input never causes a panic, including on 32-bit targets, where
+//! every length taken from the wire is converted with checked arithmetic.
+//! The only assertion in the crate is a `debug_assert!` in
+//! [`Frame::new`][`framing::Frame::new`] that catches a custom framer
+//! reporting fewer consumed bytes than its payload.
 //!
 //! # Stability
 //!
