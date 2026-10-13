@@ -44,9 +44,11 @@ std = []
 [dependencies]
 
 [dev-dependencies]
-# Pinned below 1.6 so the bench/test build resolves on MSRV 1.75.
-# proptest 1.6+ raises its own MSRV via transitive dependencies.
-proptest = { version = ">=1, <1.6", default-features = false, features = ["std"] }
+# Property testing (REPS Testing). proptest 1.11 is the newest release whose
+# declared rust-version (1.85) matches the crate MSRV; 1.12 requires 1.88.
+# Edition 2024 enables the MSRV-aware resolver (resolver = "3"), so
+# `cargo update` keeps selecting a 1.11.x release until the MSRV moves.
+proptest = { version = "1.11", default-features = false, features = ["std"] }
 
 [[bench]]
 name = "codec"
