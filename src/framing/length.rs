@@ -54,6 +54,7 @@ impl LengthWidth {
     /// assert_eq!(LengthWidth::U24.header_size(), 3);
     /// ```
     #[inline]
+    #[must_use]
     pub const fn header_size(self) -> usize {
         match self {
             LengthWidth::U8 => 1,
@@ -73,6 +74,7 @@ impl LengthWidth {
     /// assert_eq!(LengthWidth::U16.max_payload(), 65_535);
     /// ```
     #[inline]
+    #[must_use]
     pub const fn max_payload(self) -> u64 {
         match self {
             LengthWidth::U8 => u8::MAX as u64,
@@ -152,6 +154,7 @@ impl LengthPrefixed {
     /// assert_eq!(framer.max_payload(), u64::from(u32::MAX));
     /// ```
     #[inline]
+    #[must_use]
     pub const fn new(width: LengthWidth, endian: Endian) -> Self {
         Self {
             width,
@@ -246,18 +249,21 @@ impl LengthPrefixed {
 
     /// Configured prefix width.
     #[inline]
+    #[must_use]
     pub const fn width(&self) -> LengthWidth {
         self.width
     }
 
     /// Configured endianness.
     #[inline]
+    #[must_use]
     pub const fn endian(&self) -> Endian {
         self.endian
     }
 
     /// Configured maximum payload size in bytes.
     #[inline]
+    #[must_use]
     pub const fn max_payload(&self) -> u64 {
         self.max_payload
     }
@@ -265,6 +271,7 @@ impl LengthPrefixed {
     /// Configured length adjustment (see
     /// [`LengthPrefixed::with_length_adjustment`]).
     #[inline]
+    #[must_use]
     pub const fn length_adjustment(&self) -> i64 {
         self.adjustment
     }
