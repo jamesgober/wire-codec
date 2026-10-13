@@ -41,6 +41,17 @@ use crate::error::Result;
 /// The `payload` borrow lives as long as the input slice, so framers never
 /// copy data. `consumed` tells the caller how many bytes from the input the
 /// frame occupied in total, including any header or delimiter bytes.
+///
+/// # Example
+///
+/// ```
+/// use wire_codec::framing::Frame;
+///
+/// let input = b"\x03abcrest";
+/// let frame = Frame::new(&input[1..4], 4);
+/// assert_eq!(frame.payload(), b"abc");
+/// assert_eq!(frame.consumed(), 4);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Frame<'a> {
     payload: &'a [u8],
@@ -50,10 +61,17 @@ pub struct Frame<'a> {
 impl<'a> Frame<'a> {
     /// Construct a frame from its payload and total consumed-byte count.
     ///
-    /// `consumed` must be at least `payload.len()`; framers in this crate
-    /// uphold that invariant.
+    /// `consumed` must be at least `payload.len()` and, for any framer used
+    /// in a `while let Some(frame)` loop, greater than zero: a framer that
+    /// reports zero consumed bytes would hand back the same frame forever.
+    /// Framers in this crate uphold both invariants. The first one is checked
+    /// with a `debug_assert!`.
     #[inline]
     pub const fn new(payload: &'a [u8], consumed: usize) -> Self {
+        debug_assert!(
+            consumed >= payload.len(),
+            "Frame::consumed must cover the payload"
+        );
         Self { payload, consumed }
     }
 
