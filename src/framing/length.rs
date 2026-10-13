@@ -359,6 +359,8 @@ impl Framer for LengthPrefixed {
     ///   limit, or its adjusted length does not fit in the prefix width.
     /// - [`Error::InvalidLengthPrefix`] if the adjusted length is negative.
     /// - [`Error::BufferFull`] if `out` cannot hold the whole frame.
+    ///
+    /// Nothing is written on error.
     fn write_frame(&self, payload: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
         let len = u64::try_from(payload.len()).unwrap_or(u64::MAX);
         if len > self.max_payload {
@@ -373,8 +375,20 @@ impl Framer for LengthPrefixed {
             .filter(|&p| p <= self.width.max_payload())
             .ok_or_else(|| self.too_large(len))?;
         let (header, header_len) = self.prefix_bytes(prefix);
+        let total = payload
+            .len()
+            .checked_add(header_len)
+            .ok_or(Error::BufferFull)?;
+        if total > out.remaining() {
+            return Err(Error::BufferFull);
+        }
         out.write_bytes(&header[..header_len])?;
         out.write_bytes(payload)
+    }
+
+    #[inline]
+    fn max_frame_len(&self, payload_len: usize) -> Option<usize> {
+        payload_len.checked_add(self.width.header_size())
     }
 }
 
@@ -443,6 +457,7 @@ mod tests {
                 let frame = framer.next_frame(&out[..n]).unwrap().unwrap();
                 assert_eq!(frame.payload(), b"abc");
                 assert_eq!(frame.consumed(), n);
+                assert_eq!(framer.max_frame_len(3), Some(n));
             }
         }
     }
@@ -549,6 +564,16 @@ mod tests {
             Err(Error::FrameTooLarge { len: 4, limit: 3 })
         );
         assert_eq!(buf.position(), 4);
+    }
+
+    #[test]
+    fn write_is_atomic_on_buffer_full() {
+        let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
+        let mut out = [0xEEu8; 6];
+        let mut buf = WriteBuf::new(&mut out);
+        assert_eq!(framer.write_frame(b"abc", &mut buf), Err(Error::BufferFull));
+        assert_eq!(buf.position(), 0);
+        assert_eq!(out, [0xEE; 6], "no partial header is written");
     }
 
     #[test]
