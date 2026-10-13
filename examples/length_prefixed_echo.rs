@@ -2,8 +2,8 @@
 //!
 //! Run with `cargo run --example length_prefixed_echo`.
 
-use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
 use wire_codec::WriteBuf;
+use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
 
 fn main() {
     let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);

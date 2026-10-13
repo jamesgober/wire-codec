@@ -3,7 +3,7 @@
 //!
 //! Run with `cargo run --example varint_record`.
 
-use wire_codec::{varint, zigzag, Decode, Encode, ReadBuf, Result, WriteBuf};
+use wire_codec::{Decode, Encode, ReadBuf, Result, WriteBuf, varint, zigzag};
 
 #[derive(Debug, PartialEq, Eq)]
 struct Sample<'a> {
@@ -12,7 +12,7 @@ struct Sample<'a> {
     payload: &'a [u8],
 }
 
-impl<'a> Encode for Sample<'a> {
+impl Encode for Sample<'_> {
     fn encoded_size(&self) -> usize {
         varint::encoded_len_u64(zigzag::encode_i64(self.delta_ns))
             + varint::encoded_len_u32(self.sensor_id)

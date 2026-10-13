@@ -8,7 +8,7 @@
 //! - Overlong / overflow input always returns `VarintOverflow`, never panics.
 
 use proptest::prelude::*;
-use wire_codec::{varint, Error, ReadBuf, WriteBuf};
+use wire_codec::{Error, ReadBuf, WriteBuf, varint};
 
 proptest! {
     #[test]

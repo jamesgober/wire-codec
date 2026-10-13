@@ -1,7 +1,7 @@
 //! End-to-end smoke tests that exercise the public API together.
 
 use wire_codec::framing::{Delimited, Endian, Framer, LengthPrefixed, LengthWidth};
-use wire_codec::{varint, zigzag, Decode, Encode, ReadBuf, Result, WriteBuf};
+use wire_codec::{Decode, Encode, ReadBuf, Result, WriteBuf, varint, zigzag};
 
 #[test]
 fn version_is_set() {
@@ -16,7 +16,7 @@ struct Record<'a> {
     payload: &'a [u8],
 }
 
-impl<'a> Encode for Record<'a> {
+impl Encode for Record<'_> {
     fn encoded_size(&self) -> usize {
         let zz = zigzag::encode_i64(self.delta);
         varint::encoded_len_u64(zz)

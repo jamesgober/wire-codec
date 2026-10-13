@@ -10,7 +10,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use wire_codec::{varint, zigzag, ReadBuf, WriteBuf};
+use wire_codec::{ReadBuf, WriteBuf, varint, zigzag};
 
 const ITERATIONS: usize = 5_000_000;
 

@@ -6,8 +6,8 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use wire_codec::framing::{Delimited, Endian, Framer, LengthPrefixed, LengthWidth};
 use wire_codec::WriteBuf;
+use wire_codec::framing::{Delimited, Endian, Framer, LengthPrefixed, LengthWidth};
 
 const ITERATIONS: usize = 2_000_000;
 

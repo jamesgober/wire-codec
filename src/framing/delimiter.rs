@@ -92,7 +92,7 @@ impl<'d> Delimited<'d> {
     }
 }
 
-impl<'d> Framer for Delimited<'d> {
+impl Framer for Delimited<'_> {
     fn next_frame<'a>(&self, input: &'a [u8]) -> Result<Option<Frame<'a>>> {
         // Cap the search window at max_payload + delimiter length. Saturating
         // because the default max_payload is usize::MAX.

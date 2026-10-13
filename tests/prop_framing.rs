@@ -11,8 +11,8 @@
 //! - Delimited: arbitrary input bytes never panic the decoder.
 
 use proptest::prelude::*;
-use wire_codec::framing::{Delimited, Endian, Framer, LengthPrefixed, LengthWidth};
 use wire_codec::WriteBuf;
+use wire_codec::framing::{Delimited, Endian, Framer, LengthPrefixed, LengthWidth};
 
 fn width_strategy() -> impl Strategy<Value = LengthWidth> {
     prop_oneof![
