@@ -115,7 +115,7 @@ pub mod zigzag;
 pub use bitfield::{BitReader, BitWriter};
 pub use buf::{ReadBuf, WriteBuf};
 pub use error::{Error, Result};
-pub use traits::{Decode, Encode};
+pub use traits::{Be, Decode, Encode, Le, Varint};
 
 /// Crate version string, populated by Cargo at build time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
