@@ -5,12 +5,16 @@
 //! delimiter is stripped from the emitted payload but counted toward
 //! [`Frame::consumed`].
 //!
-//! # Limits
+//! # Limits and streaming
 //!
 //! [`Delimited::new`] keeps the 1.0 behaviour of an unbounded payload size,
 //! which lets a peer that never sends the delimiter grow the caller's buffer
 //! without limit. For untrusted input, use [`Delimited::bounded`] (a
 //! [`Delimited::DEFAULT_MAX_PAYLOAD`] cap) or [`Delimited::with_max_payload`].
+//!
+//! When input arrives in pieces, call [`Framer::next_frame_from`] or use a
+//! [`StreamDecoder`][`crate::framing::StreamDecoder`] so the search resumes
+//! where it stopped instead of rescanning the buffered prefix on every call.
 
 use crate::buf::WriteBuf;
 use crate::error::{Error, Result};
@@ -158,29 +162,9 @@ impl Framer for Delimited<'_> {
     /// delimiter starting at or before offset `max_payload`. The `len` field
     /// is then a lower bound (`max_payload + 1`): the true length is unknown
     /// because the frame has not ended yet.
+    #[inline]
     fn next_frame<'a>(&self, input: &'a [u8]) -> Result<Option<Frame<'a>>> {
-        let delim_len = self.delimiter.len();
-        // A valid delimiter starts at offset <= max_payload, so it ends within
-        // `max_payload + delim_len` bytes. Saturating because the unbounded
-        // default is usize::MAX.
-        let window_cap = self.max_payload.saturating_add(delim_len);
-        let window = if input.len() > window_cap {
-            &input[..window_cap]
-        } else {
-            input
-        };
-        if let Some(pos) = search::find(window, self.delimiter, 0) {
-            return Ok(Some(Frame::new(&input[..pos], pos + delim_len)));
-        }
-        if input.len() > window_cap {
-            // No delimiter inside the window and the input has already run
-            // past it: the payload is at least max_payload + 1 bytes long.
-            return Err(Error::FrameTooLarge {
-                len: self.max_payload.saturating_add(1),
-                limit: self.max_payload,
-            });
-        }
-        Ok(None)
+        self.next_frame_from(input, &mut 0)
     }
 
     /// Serialize `payload` followed by the delimiter.
@@ -206,11 +190,57 @@ impl Framer for Delimited<'_> {
         out.write_bytes(payload)?;
         out.write_bytes(self.delimiter)
     }
+
+    /// Resumable delimiter search; see [`Framer::next_frame_from`].
+    ///
+    /// On `Ok(None)`, `scanned` is set to the number of leading bytes that
+    /// can no longer start a delimiter, so the next call only examines new
+    /// input (plus `delimiter.len() - 1` bytes of overlap for a delimiter
+    /// split across reads). Values larger than the input are clamped.
+    ///
+    /// # Errors
+    ///
+    /// Same contract as [`Framer::next_frame`] for this type.
+    fn next_frame_from<'a>(
+        &self,
+        input: &'a [u8],
+        scanned: &mut usize,
+    ) -> Result<Option<Frame<'a>>> {
+        let delim_len = self.delimiter.len();
+        // A valid delimiter starts at offset <= max_payload, so it ends within
+        // `max_payload + delim_len` bytes. Saturating because the unbounded
+        // default is usize::MAX.
+        let window_cap = self.max_payload.saturating_add(delim_len);
+        let window = if input.len() > window_cap {
+            &input[..window_cap]
+        } else {
+            input
+        };
+        let start = (*scanned).min(window.len());
+        if let Some(pos) = search::find(window, self.delimiter, start) {
+            *scanned = 0;
+            return Ok(Some(Frame::new(&input[..pos], pos + delim_len)));
+        }
+        if input.len() > window_cap {
+            // No delimiter inside the window and the input has already run
+            // past it: the payload is at least max_payload + 1 bytes long.
+            return Err(Error::FrameTooLarge {
+                len: self.max_payload.saturating_add(1),
+                limit: self.max_payload,
+            });
+        }
+        // Every offset before this one has been ruled out as a delimiter
+        // start. The last `delim_len - 1` bytes might begin a delimiter that
+        // completes once more input arrives.
+        *scanned = window.len().saturating_sub(delim_len - 1);
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::framing::StreamDecoder;
 
     #[test]
     fn newline_round_trip() {
@@ -327,5 +357,55 @@ mod tests {
     fn bounded_constructor() {
         let framer = Delimited::bounded(b"\r\n").unwrap();
         assert_eq!(framer.max_payload(), Delimited::DEFAULT_MAX_PAYLOAD);
+    }
+
+    #[test]
+    fn resumable_scan_handles_split_delimiter() {
+        let framer = Delimited::new(b"\r\n").unwrap();
+        let mut scanned = 0;
+        assert_eq!(framer.next_frame_from(b"abc\r", &mut scanned), Ok(None));
+        // The trailing '\r' may begin the delimiter, so it is not skipped.
+        assert_eq!(scanned, 3);
+        let frame = framer
+            .next_frame_from(b"abc\r\n", &mut scanned)
+            .unwrap()
+            .unwrap();
+        assert_eq!(frame.payload(), b"abc");
+        assert_eq!(scanned, 0);
+    }
+
+    #[test]
+    fn resumable_scan_clamps_oversized_hint() {
+        let framer = Delimited::new(b"\n").unwrap();
+        let mut scanned = 1_000;
+        // The hint is a promise about the input; an out-of-range value is
+        // clamped rather than trusted.
+        assert_eq!(framer.next_frame_from(b"ab", &mut scanned), Ok(None));
+        assert_eq!(scanned, 2);
+    }
+
+    #[test]
+    fn byte_at_a_time_stream_does_linear_work() {
+        // A 256 KiB line delivered one byte at a time. With the resumable
+        // scan each call only looks at the new byte, so the total number of
+        // bytes examined is bounded by the input length plus overlap.
+        let framer = Delimited::new(b"\r\n").unwrap();
+        let mut decoder = StreamDecoder::new(framer);
+        let mut line = vec![b'x'; 256 * 1024];
+        line.extend_from_slice(b"\r\n");
+        let mut examined = 0usize;
+        let mut frames = 0;
+        for end in 1..=line.len() {
+            let before = decoder.scanned;
+            match decoder.decode(&line[..end]).unwrap() {
+                Some(frame) => {
+                    assert_eq!(frame.payload().len(), 256 * 1024);
+                    frames += 1;
+                }
+                None => examined += end - before,
+            }
+        }
+        assert_eq!(frames, 1);
+        assert!(examined <= 2 * line.len(), "examined {examined} bytes");
     }
 }
