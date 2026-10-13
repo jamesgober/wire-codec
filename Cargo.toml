@@ -1,6 +1,6 @@
 ﻿[package]
 name = "wire-codec"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.85"
 readme = "README.md"
@@ -12,19 +12,21 @@ authors = [
     "James Gober <me@jamesgober.com>"
 ]
 
-description = "Binary frame codec and protocol codec toolkit. Length-prefixed, delimiter-based, and custom framing strategies. Built-in varint, zigzag, bitfield, and packed struct encoding. Runtime-agnostic foundation under network-protocol crates."
+description = "Binary frame codec and protocol codec toolkit. Length-prefixed, varint-prefixed, delimiter-based, checksummed, and custom framing strategies. Built-in varint, zigzag, bitfield, packed struct, CRC, and COBS encoding. Allocation-free, no_std, runtime-agnostic, with optional tokio-util and futures codec adapters."
 
 keywords = [
     "codec",
     "framing",
     "varint",
-    "wire",
-    "rust"
+    "no-std",
+    "protocol"
 ]
 
 categories = [
     "encoding",
-    "network-programming"
+    "network-programming",
+    "no-std",
+    "embedded"
 ]
 
 documentation = "https://docs.rs/wire-codec"
