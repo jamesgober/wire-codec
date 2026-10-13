@@ -90,6 +90,68 @@ impl<'a> BitReader<'a> {
         }
         Ok(value)
     }
+
+    /// Read one bit as a `bool`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEof`] if no bits remain.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::BitReader;
+    ///
+    /// let mut r = BitReader::new(&[0b1000_0000]);
+    /// assert!(r.read_bool().unwrap());
+    /// assert!(!r.read_bool().unwrap());
+    /// ```
+    #[inline]
+    pub fn read_bool(&mut self) -> Result<bool> {
+        self.read_bits(1).map(|bit| bit != 0)
+    }
+
+    /// Read the next `n` bits as a two's-complement signed value, sign-extended
+    /// to `i64`.
+    ///
+    /// # Errors
+    ///
+    /// Same contract as [`BitReader::read_bits`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::BitReader;
+    ///
+    /// // 0b101 in a 3-bit signed field is -3.
+    /// let mut r = BitReader::new(&[0b1010_0000]);
+    /// assert_eq!(r.read_signed_bits(3).unwrap(), -3);
+    /// ```
+    #[inline]
+    pub fn read_signed_bits(&mut self, n: u32) -> Result<i64> {
+        self.read_bits(n).map(|raw| sign_extend(raw, n))
+    }
+}
+
+/// Interpret the low `n` bits of `raw` (1 <= n <= 64) as two's complement.
+#[inline]
+pub(crate) const fn sign_extend(raw: u64, n: u32) -> i64 {
+    let shift = 64 - n;
+    ((raw << shift) as i64) >> shift
+}
+
+/// Encode `value` as an `n`-bit two's-complement field, or `None` if it does
+/// not fit.
+#[inline]
+pub(crate) fn signed_to_bits(value: i64, n: u32) -> Option<u64> {
+    if n == 0 || n > MAX_BIT_WIDTH {
+        return None;
+    }
+    let shift = 64 - n;
+    // The value fits iff truncating to `n` bits and sign-extending back
+    // reproduces it.
+    let raw = (value as u64) & (u64::MAX >> shift);
+    (sign_extend(raw, n) == value).then_some(raw)
 }
 
 /// Writes packed bits to a caller-supplied byte slice, most-significant-bit first.
@@ -196,6 +258,56 @@ impl<'a> BitWriter<'a> {
         Ok(())
     }
 
+    /// Write one bit: `1` for `true`, `0` for `false`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if no bits remain in the buffer.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::BitWriter;
+    ///
+    /// let mut storage = [0u8; 1];
+    /// let mut w = BitWriter::new(&mut storage);
+    /// w.write_bool(true).unwrap();
+    /// w.write_bool(false).unwrap();
+    /// w.write_bool(true).unwrap();
+    /// assert_eq!(w.finish(), 1);
+    /// assert_eq!(storage[0], 0b1010_0000);
+    /// ```
+    #[inline]
+    pub fn write_bool(&mut self, value: bool) -> Result<()> {
+        self.write_bits(u64::from(value), 1)
+    }
+
+    /// Write `value` as an `n`-bit two's-complement field.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BitOverflow`] if `n` is `0`, greater than [`MAX_BIT_WIDTH`],
+    ///   or `value` is outside `-(2^(n-1))..2^(n-1)`.
+    /// - [`Error::BufferFull`] if fewer than `n` bits remain in the buffer.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::{BitReader, BitWriter, Error};
+    ///
+    /// let mut storage = [0u8; 1];
+    /// let mut w = BitWriter::new(&mut storage);
+    /// w.write_signed_bits(-3, 3).unwrap();
+    /// assert_eq!(w.write_signed_bits(4, 3), Err(Error::BitOverflow));
+    /// assert_eq!(w.finish(), 1);
+    /// assert_eq!(BitReader::new(&storage).read_signed_bits(3).unwrap(), -3);
+    /// ```
+    #[inline]
+    pub fn write_signed_bits(&mut self, value: i64, n: u32) -> Result<()> {
+        let raw = signed_to_bits(value, n).ok_or(Error::BitOverflow)?;
+        self.write_bits(raw, n)
+    }
+
     /// Finalize writes and return the number of whole bytes consumed.
     ///
     /// A partially-filled trailing byte counts as one full byte, and its
@@ -295,6 +407,92 @@ mod tests {
         r.align_to_byte();
         assert_eq!(r.bits_consumed(), 16, "align at end of input stays put");
         assert_eq!(r.read_bits(1), Err(Error::UnexpectedEof));
+    }
+
+    #[test]
+    fn width_validation() {
+        let mut r = BitReader::new(&[0xFF; 16]);
+        assert_eq!(r.read_bits(0), Err(Error::BitOverflow));
+        assert_eq!(r.read_bits(65), Err(Error::BitOverflow));
+        assert_eq!(r.read_signed_bits(0), Err(Error::BitOverflow));
+        assert_eq!(r.bits_consumed(), 0);
+
+        let mut storage = [0u8; 16];
+        let mut w = BitWriter::new(&mut storage);
+        assert_eq!(w.write_bits(0, 0), Err(Error::BitOverflow));
+        assert_eq!(w.write_bits(0, 65), Err(Error::BitOverflow));
+        assert_eq!(w.write_signed_bits(0, 0), Err(Error::BitOverflow));
+        assert_eq!(w.write_signed_bits(0, 65), Err(Error::BitOverflow));
+        assert_eq!(w.bits_written(), 0);
+    }
+
+    #[test]
+    fn full_width_fields_at_unaligned_offsets() {
+        for offset in 0..8u32 {
+            let mut storage = [0u8; 10];
+            let mut w = BitWriter::new(&mut storage);
+            if offset > 0 {
+                w.write_bits(0, offset).unwrap();
+            }
+            w.write_bits(0xDEAD_BEEF_0123_4567, 64).unwrap();
+            assert_eq!(w.write_bits(u64::MAX, 64), Err(Error::BufferFull));
+            let n = w.finish();
+            let mut r = BitReader::new(&storage[..n]);
+            if offset > 0 {
+                assert_eq!(r.read_bits(offset).unwrap(), 0);
+            }
+            assert_eq!(r.read_bits(64).unwrap(), 0xDEAD_BEEF_0123_4567);
+        }
+    }
+
+    #[test]
+    fn reads_and_writes_spanning_several_bytes() {
+        let mut storage = [0u8; 4];
+        let mut w = BitWriter::new(&mut storage);
+        w.write_bits(0b1, 1).unwrap();
+        w.write_bits(0x1_2345, 17).unwrap();
+        w.write_bits(0x3FFF, 14).unwrap();
+        assert_eq!(w.bits_written(), 32);
+        assert_eq!(w.write_bool(true), Err(Error::BufferFull));
+        assert_eq!(w.finish(), 4);
+        let mut r = BitReader::new(&storage);
+        assert_eq!(r.read_bits(1).unwrap(), 1);
+        assert_eq!(r.read_bits(17).unwrap(), 0x1_2345);
+        assert_eq!(r.read_bits(14).unwrap(), 0x3FFF);
+        assert_eq!(r.read_bool(), Err(Error::UnexpectedEof));
+    }
+
+    #[test]
+    fn signed_fields() {
+        for n in [1u32, 2, 7, 8, 13, 63, 64] {
+            let min = if n == 64 {
+                i64::MIN
+            } else {
+                -(1i64 << (n - 1))
+            };
+            let max = if n == 64 {
+                i64::MAX
+            } else {
+                (1i64 << (n - 1)) - 1
+            };
+            for v in [min, max, 0, -1] {
+                let mut storage = [0u8; 8];
+                let mut w = BitWriter::new(&mut storage);
+                w.write_signed_bits(v, n).unwrap();
+                let bytes = w.finish();
+                let mut r = BitReader::new(&storage[..bytes]);
+                assert_eq!(r.read_signed_bits(n).unwrap(), v, "n={n} v={v}");
+            }
+            if n < 64 {
+                let mut storage = [0u8; 8];
+                let mut w = BitWriter::new(&mut storage);
+                assert_eq!(w.write_signed_bits(max + 1, n), Err(Error::BitOverflow));
+                assert_eq!(w.write_signed_bits(min - 1, n), Err(Error::BitOverflow));
+            }
+        }
+        assert_eq!(sign_extend(0b1, 1), -1);
+        assert_eq!(signed_to_bits(-1, 1), Some(1));
+        assert_eq!(signed_to_bits(1, 1), None);
     }
 
     #[test]
