@@ -87,27 +87,25 @@ pub const fn max_encoded_len(len: usize) -> usize {
 /// ```
 pub fn encode(src: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
     let dst = out.spare_mut();
+    // Check the room before touching the output. With room for the worst
+    // case no exact count is needed; otherwise a counting pass decides.
+    if dst.len() < max_encoded_len(src.len()) && dst.len() < encoded_len(src) {
+        return Err(Error::BufferFull);
+    }
     // Index of the code byte of the block currently being filled.
     let mut code_at = 0;
     let mut write = 1;
     let mut code: u8 = 1;
-    if dst.is_empty() {
-        return Err(Error::BufferFull);
-    }
     for (i, &byte) in src.iter().enumerate() {
         if byte != 0 {
-            *dst.get_mut(write).ok_or(Error::BufferFull)? = byte;
+            dst[write] = byte;
             write += 1;
             code += 1;
         }
-        let more_input = i + 1 < src.len();
-        if byte == 0 || (code == 0xFF && more_input) {
+        if byte == 0 || (code == 0xFF && i + 1 < src.len()) {
             // Close the block and reserve a code byte for the next one.
             dst[code_at] = code;
             code_at = write;
-            if code_at >= dst.len() {
-                return Err(Error::BufferFull);
-            }
             write += 1;
             code = 1;
         }
@@ -117,8 +115,31 @@ pub fn encode(src: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Exact size of the encoding [`encode`] produces for `src`.
+fn encoded_len(src: &[u8]) -> usize {
+    let mut len = 1;
+    let mut code: u8 = 1;
+    for (i, &byte) in src.iter().enumerate() {
+        if byte != 0 {
+            len += 1;
+            code += 1;
+        }
+        if byte == 0 || (code == 0xFF && i + 1 < src.len()) {
+            len += 1;
+            code = 1;
+        }
+    }
+    len
+}
+
 /// Decode one COBS block (without its `0x00` delimiter) from `src` into
 /// `out`.
+///
+/// Like the reference decoder, this accepts both encodings of a payload
+/// that ends with a full 254-byte run: with and without a trailing empty
+/// block (`0x01`). [`encode`] only ever produces the shorter form. If the
+/// encoded bytes must be canonical (for example because they are hashed or
+/// signed), re-encode the decoded payload and compare.
 ///
 /// # Errors
 ///
@@ -140,21 +161,26 @@ pub fn encode(src: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
 /// assert_eq!(buf.written(), &[0x11, 0x22, 0x00, 0x33]);
 /// ```
 pub fn decode(src: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
-    let dst = out.spare_mut();
+    // Validate and size the block first, so nothing is written on error.
+    let mut len = 0;
+    for_each_run(src, |run, zero_follows| {
+        len += run.len() + usize::from(zero_follows);
+        Ok(())
+    })?;
+    let Some(dst) = out.spare_mut().get_mut(..len) else {
+        return Err(Error::BufferFull);
+    };
     let mut write = 0;
     for_each_run(src, |run, zero_follows| {
-        let end = write + run.len();
-        dst.get_mut(write..end)
-            .ok_or(Error::BufferFull)?
-            .copy_from_slice(run);
-        write = end;
+        dst[write..write + run.len()].copy_from_slice(run);
+        write += run.len();
         if zero_follows {
-            *dst.get_mut(write).ok_or(Error::BufferFull)? = 0;
+            dst[write] = 0;
             write += 1;
         }
         Ok(())
     })?;
-    out.commit(write);
+    out.commit(len);
     Ok(())
 }
 
@@ -167,7 +193,8 @@ pub fn decode(src: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
 /// # Errors
 ///
 /// Returns [`Error::InvalidEncoding`] under the same conditions as
-/// [`decode`]. `buf` may be partially modified on error.
+/// [`decode`]. The block is validated before it is rewritten, so `buf` is
+/// unchanged on error.
 ///
 /// # Example
 ///
@@ -330,19 +357,64 @@ mod tests {
             let mut buf = WriteBuf::new(&mut out);
             assert_eq!(encode(src, &mut buf), Err(Error::BufferFull), "{src:?}");
             assert_eq!(buf.position(), 0);
+            assert!(
+                out.iter().all(|&b| b == 0xEE),
+                "nothing written for {src:?}"
+            );
+        }
+        // Exactly the exact size (below the worst case) succeeds.
+        let raw: Vec<u8> = vec![0x00; 300];
+        let mut out = vec![0u8; encoded_len(&raw)];
+        assert!(out.len() < max_encoded_len(raw.len()) || raw.is_empty());
+        encode(&raw, &mut WriteBuf::new(&mut out)).unwrap();
+    }
+
+    #[test]
+    fn encoded_len_matches_encode() {
+        for len in [0usize, 1, 253, 254, 255, 508, 600] {
+            for zero_every in [1usize, 2, 7, 1000] {
+                let raw: Vec<u8> = (0..len).map(|i| u8::from(i % zero_every != 0)).collect();
+                let written = encode_vec(&raw).len();
+                assert_eq!(encoded_len(&raw), written, "len={len} every={zero_every}");
+            }
         }
     }
 
     #[test]
-    fn decode_is_atomic_on_buffer_full() {
-        let mut out = [0u8; 2];
+    fn non_canonical_trailing_block_is_accepted() {
+        // Documented: both encodings of a full trailing run decode equally.
+        let mut long = vec![0xFFu8];
+        long.extend(core::iter::repeat_n(0x07u8, 254));
+        let mut with_empty = long.clone();
+        with_empty.push(0x01);
+        assert_eq!(decode_vec(&long).unwrap(), decode_vec(&with_empty).unwrap());
+        assert_eq!(encode_vec(&decode_vec(&with_empty).unwrap()), long);
+    }
+
+    #[test]
+    fn decode_is_atomic_on_error() {
+        let mut out = [0xEEu8; 2];
         let mut buf = WriteBuf::new(&mut out);
         assert_eq!(decode(&[0x04, 1, 2, 3], &mut buf), Err(Error::BufferFull));
         assert_eq!(
             decode(&[0x02, 1, 0x02, 2], &mut buf),
             Err(Error::BufferFull)
         );
+        // Valid first run, malformed second run: rejected before writing.
+        assert_eq!(
+            decode(&[0x02, 1, 0x05], &mut buf),
+            Err(Error::InvalidEncoding)
+        );
         assert_eq!(buf.position(), 0);
+        assert_eq!(out, [0xEE, 0xEE], "nothing is written on error");
+
+        let mut block = [0x02, 0x11, 0x03, 0x22];
+        assert_eq!(decode_in_place(&mut block), Err(Error::InvalidEncoding));
+        assert_eq!(
+            block,
+            [0x02, 0x11, 0x03, 0x22],
+            "in-place input unchanged on error"
+        );
     }
 
     #[test]

@@ -179,11 +179,21 @@ impl<F: Framer, C: Checksum> Framer for Checksummed<F, C> {
     /// # Errors
     ///
     /// - [`Error::BufferFull`] if `out` cannot hold the frame and trailer.
+    ///   When the inner framer reports [`Framer::max_frame_len`] (every
+    ///   built-in framer does, exactly), that bound plus the trailer is
+    ///   checked before anything is written.
     /// - Any error from the inner framer.
     ///
-    /// Nothing is written on error, provided the inner framer is itself
-    /// atomic (all built-in framers are).
+    /// The cursor is unchanged on error. With a built-in inner framer
+    /// nothing is written either. With a custom inner framer that reports no
+    /// size bound, a trailer that does not fit can leave the inner frame's
+    /// bytes behind the (restored) cursor.
     fn write_frame(&self, payload: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
+        if let Some(inner_max) = self.inner.max_frame_len(payload.len()) {
+            if inner_max.saturating_add(C::LEN) > out.remaining() {
+                return Err(Error::BufferFull);
+            }
+        }
         let start = out.position();
         self.inner.write_frame(payload, out)?;
         let covered = match self.scope {
@@ -284,10 +294,13 @@ mod tests {
         let inner = LengthPrefixed::new(LengthWidth::U8, Endian::Big);
         let framer = Checksummed::new(inner, Crc32, Endian::Big);
         // Room for the inner frame (4 bytes) but not the 4-byte trailer.
-        let mut out = [0u8; 6];
+        let mut out = [0xEEu8; 6];
         let mut buf = WriteBuf::new(&mut out);
         assert_eq!(framer.write_frame(b"abc", &mut buf), Err(Error::BufferFull));
         assert_eq!(buf.position(), 0);
+        assert_eq!(out, [0xEE; 6], "nothing is written on error");
+        let mut big = [0u8; 16];
+        let mut buf = WriteBuf::new(&mut big);
         // Inner framer errors propagate unchanged.
         let framer = Checksummed::new(inner.with_max_payload(1), Crc32, Endian::Big);
         assert!(matches!(

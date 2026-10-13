@@ -21,8 +21,12 @@
 //! is part of the wire format, so it must be chosen explicitly with a
 //! wrapper.
 //!
-//! Tuples are atomic like every other operation in the crate: if a later
-//! element fails, the cursor is restored to where the tuple started.
+//! Tuples restore the cursor to where the tuple started if any element
+//! fails. They check the total `encoded_size` against the remaining room
+//! first, so a short buffer is reported as [`Error::BufferFull`] before
+//! anything is written. If a later element fails for another reason (a
+//! packed field out of range, say), the bytes of the earlier elements remain
+//! behind the restored cursor.
 
 use crate::buf::{ReadBuf, WriteBuf};
 use crate::error::{Error, Result};
@@ -361,6 +365,11 @@ macro_rules! tuple_impls {
             }
             #[inline]
             fn encode(&self, buf: &mut WriteBuf<'_>) -> Result<()> {
+                // `encoded_size` is exact by contract: check the room once so
+                // a short buffer writes nothing at all.
+                if self.encoded_size() > buf.remaining() {
+                    return Err(Error::BufferFull);
+                }
                 let start = buf.position();
                 let result = (|| {
                     $(self.$idx.encode(buf)?;)+
@@ -396,6 +405,18 @@ tuple_impls! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An element that always fails to encode, for atomicity tests.
+    struct Rejects;
+
+    impl Encode for Rejects {
+        fn encoded_size(&self) -> usize {
+            1
+        }
+        fn encode(&self, _buf: &mut WriteBuf<'_>) -> Result<()> {
+            Err(Error::InvalidEncoding)
+        }
+    }
 
     fn round_trip<T>(value: T) -> T
     where
@@ -479,9 +500,16 @@ mod tests {
         assert_eq!(<(u8, Be<u16>)>::decode(&mut r), Err(Error::UnexpectedEof));
         assert_eq!(r.position(), 0);
 
-        let mut out = [0u8; 2];
+        let mut out = [0xEEu8; 2];
         let mut buf = WriteBuf::new(&mut out);
         assert_eq!((1u8, Be(2u16)).encode(&mut buf), Err(Error::BufferFull));
+        assert_eq!(buf.position(), 0);
+        assert_eq!(out, [0xEE, 0xEE], "a short buffer writes nothing");
+
+        // A later element failing for another reason restores the cursor.
+        let mut out = [0u8; 4];
+        let mut buf = WriteBuf::new(&mut out);
+        assert_eq!((1u8, Rejects).encode(&mut buf), Err(Error::InvalidEncoding));
         assert_eq!(buf.position(), 0);
     }
 
