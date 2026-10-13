@@ -184,8 +184,10 @@ impl<'a> ReadBuf<'a> {
     /// ```
     #[inline]
     pub fn read_array_ref<const N: usize>(&mut self) -> Result<&'a [u8; N]> {
-        let slice = self.peek(N)?;
-        let array = <&[u8; N]>::try_from(slice).map_err(|_| Error::UnexpectedEof)?;
+        let array = self
+            .remaining_slice()
+            .first_chunk::<N>()
+            .ok_or(Error::UnexpectedEof)?;
         self.pos += N;
         Ok(array)
     }
