@@ -73,10 +73,9 @@ pub enum Error {
         /// Configured upper bound enforced by the framer.
         limit: usize,
     },
-    /// A length prefix was structurally invalid.
-    ///
-    /// Not produced by the built-in framers in this release. Available to
-    /// custom [`Framer`][`crate::framing::Framer`] implementations.
+    /// A length prefix was structurally invalid: after applying the framer's
+    /// length adjustment it describes a negative payload length, or a payload
+    /// cannot be represented under the configured adjustment.
     InvalidLengthPrefix,
     /// A delimiter byte sequence was not found within the available input.
     ///

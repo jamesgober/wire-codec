@@ -2,7 +2,9 @@
 //!
 //! Each frame is preceded by a fixed-width unsigned integer that gives the
 //! length of the payload in bytes. The width and endianness are chosen at
-//! construction time.
+//! construction time. An optional length adjustment covers protocols whose
+//! length field counts something other than exactly the payload (for example
+//! "length includes the header").
 //!
 //! # Limits
 //!
@@ -126,6 +128,7 @@ pub struct LengthPrefixed {
     width: LengthWidth,
     endian: Endian,
     max_payload: u64,
+    adjustment: i64,
 }
 
 impl LengthPrefixed {
@@ -154,6 +157,7 @@ impl LengthPrefixed {
             width,
             endian,
             max_payload: width.max_payload(),
+            adjustment: 0,
         }
     }
 
@@ -201,6 +205,45 @@ impl LengthPrefixed {
         self
     }
 
+    /// Set the length adjustment: the payload length is the prefix value
+    /// plus `adjustment`.
+    ///
+    /// The default is `0` (the prefix counts exactly the payload bytes). When
+    /// the prefix counts its own bytes as well, use `-(header_size)`; when it
+    /// counts a fixed trailer that the caller handles separately, use the
+    /// trailer size. This mirrors `length_adjustment` in
+    /// `tokio_util::codec::LengthDelimitedCodec`.
+    ///
+    /// On decode, a prefix that adjusts to a negative length yields
+    /// [`Error::InvalidLengthPrefix`]. On encode, a payload whose adjusted
+    /// prefix value would be negative also yields
+    /// [`Error::InvalidLengthPrefix`], and one whose prefix value would not
+    /// fit in the width yields [`Error::FrameTooLarge`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::WriteBuf;
+    /// use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
+    ///
+    /// // The 2-byte length field counts itself.
+    /// let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big).with_length_adjustment(-2);
+    ///
+    /// let mut out = [0u8; 8];
+    /// let mut buf = WriteBuf::new(&mut out);
+    /// framer.write_frame(b"abc", &mut buf).unwrap();
+    /// assert_eq!(buf.written(), &[0x00, 0x05, b'a', b'b', b'c']);
+    ///
+    /// let frame = framer.next_frame(&out[..5]).unwrap().unwrap();
+    /// assert_eq!(frame.payload(), b"abc");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn with_length_adjustment(mut self, adjustment: i64) -> Self {
+        self.adjustment = adjustment;
+        self
+    }
+
     /// Configured prefix width.
     #[inline]
     pub const fn width(&self) -> LengthWidth {
@@ -217,6 +260,13 @@ impl LengthPrefixed {
     #[inline]
     pub const fn max_payload(&self) -> u64 {
         self.max_payload
+    }
+
+    /// Configured length adjustment (see
+    /// [`LengthPrefixed::with_length_adjustment`]).
+    #[inline]
+    pub const fn length_adjustment(&self) -> i64 {
+        self.adjustment
     }
 
     /// Decode the prefix from exactly `header_size()` bytes.
@@ -267,14 +317,23 @@ impl Framer for LengthPrefixed {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::FrameTooLarge`] if the prefix exceeds the configured
-    /// limit, or the payload cannot be addressed on this target.
+    /// - [`Error::FrameTooLarge`] if the (adjusted) prefix exceeds the
+    ///   configured limit, or the payload cannot be addressed on this target.
+    /// - [`Error::InvalidLengthPrefix`] if the length adjustment turns the
+    ///   prefix into a negative length.
     fn next_frame<'a>(&self, input: &'a [u8]) -> Result<Option<Frame<'a>>> {
         let header_size = self.width.header_size();
         let Some(header) = input.get(..header_size) else {
             return Ok(None);
         };
-        let len = self.read_prefix(header);
+        let raw = self.read_prefix(header);
+        // The prefix is attacker-controlled: apply the adjustment in i128 so
+        // neither the addition nor the sign can overflow.
+        let adjusted = i128::from(raw) + i128::from(self.adjustment);
+        if adjusted < 0 {
+            return Err(Error::InvalidLengthPrefix);
+        }
+        let len = u64::try_from(adjusted).unwrap_or(u64::MAX);
         if len > self.max_payload {
             return Err(self.too_large(len));
         }
@@ -297,15 +356,23 @@ impl Framer for LengthPrefixed {
     /// # Errors
     ///
     /// - [`Error::FrameTooLarge`] if the payload exceeds the configured
-    ///   limit.
+    ///   limit, or its adjusted length does not fit in the prefix width.
+    /// - [`Error::InvalidLengthPrefix`] if the adjusted length is negative.
     /// - [`Error::BufferFull`] if `out` cannot hold the whole frame.
     fn write_frame(&self, payload: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
         let len = u64::try_from(payload.len()).unwrap_or(u64::MAX);
         if len > self.max_payload {
             return Err(self.too_large(len));
         }
-        // `max_payload` never exceeds the width's maximum, so `len` fits.
-        let (header, header_len) = self.prefix_bytes(len);
+        let prefix = i128::from(len) - i128::from(self.adjustment);
+        if prefix < 0 {
+            return Err(Error::InvalidLengthPrefix);
+        }
+        let prefix = u64::try_from(prefix)
+            .ok()
+            .filter(|&p| p <= self.width.max_payload())
+            .ok_or_else(|| self.too_large(len))?;
+        let (header, header_len) = self.prefix_bytes(prefix);
         out.write_bytes(&header[..header_len])?;
         out.write_bytes(payload)
     }
@@ -352,6 +419,11 @@ mod tests {
     fn huge_u64_prefix_never_panics() {
         let framer = LengthPrefixed::new(LengthWidth::U64, Endian::Little);
         let input = [0xFF; 12];
+        assert!(matches!(
+            framer.next_frame(&input),
+            Err(Error::FrameTooLarge { .. })
+        ));
+        let framer = framer.with_length_adjustment(i64::MAX);
         assert!(matches!(
             framer.next_frame(&input),
             Err(Error::FrameTooLarge { .. })
@@ -485,12 +557,64 @@ mod tests {
         assert_eq!(framer.max_payload(), LengthPrefixed::DEFAULT_MAX_PAYLOAD);
         assert_eq!(framer.width(), LengthWidth::U64);
         assert_eq!(framer.endian(), Endian::Big);
+        assert_eq!(framer.length_adjustment(), 0);
         let mut input = [0u8; 8];
         input.copy_from_slice(&(LengthPrefixed::DEFAULT_MAX_PAYLOAD + 1).to_be_bytes());
         assert!(matches!(
             framer.next_frame(&input),
             Err(Error::FrameTooLarge { .. })
         ));
+    }
+
+    #[test]
+    fn length_adjustment_including_header() {
+        let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big).with_length_adjustment(-4);
+        let mut out = [0u8; 16];
+        let mut buf = WriteBuf::new(&mut out);
+        framer.write_frame(b"xyz", &mut buf).unwrap();
+        assert_eq!(buf.written(), &[0, 0, 0, 7, b'x', b'y', b'z']);
+        let frame = framer.next_frame(&out[..7]).unwrap().unwrap();
+        assert_eq!(frame.payload(), b"xyz");
+        assert_eq!(frame.consumed(), 7);
+        // A prefix smaller than the header adjusts to a negative length.
+        assert_eq!(
+            framer.next_frame(&[0, 0, 0, 3]),
+            Err(Error::InvalidLengthPrefix)
+        );
+    }
+
+    #[test]
+    fn length_adjustment_positive() {
+        // The prefix omits a 2-byte field that is part of the payload.
+        let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big).with_length_adjustment(2);
+        let frame = framer
+            .next_frame(&[0x01, b'a', b'b', b'c'])
+            .unwrap()
+            .unwrap();
+        assert_eq!(frame.payload(), b"abc");
+        let mut out = [0u8; 8];
+        let mut buf = WriteBuf::new(&mut out);
+        framer.write_frame(b"abc", &mut buf).unwrap();
+        assert_eq!(buf.written(), &[0x01, b'a', b'b', b'c']);
+        // A payload shorter than the adjustment cannot be represented.
+        assert_eq!(
+            framer.write_frame(b"a", &mut buf),
+            Err(Error::InvalidLengthPrefix)
+        );
+    }
+
+    #[test]
+    fn length_adjustment_overflowing_the_width() {
+        // 255 payload bytes plus a self-counting header does not fit in u8.
+        let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big).with_length_adjustment(-1);
+        let mut out = [0u8; 512];
+        let mut buf = WriteBuf::new(&mut out);
+        assert!(matches!(
+            framer.write_frame(&[0u8; 255], &mut buf),
+            Err(Error::FrameTooLarge { .. })
+        ));
+        framer.write_frame(&[0u8; 254], &mut buf).unwrap();
+        assert_eq!(buf.written()[0], 255);
     }
 
     #[test]

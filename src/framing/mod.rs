@@ -8,7 +8,8 @@
 //! Concrete framers shipped with the crate:
 //!
 //! - [`length::LengthPrefixed`] for fixed-width length-prefixed protocols
-//!   (1, 2, 3, 4, or 8 byte prefixes, either byte order).
+//!   (1, 2, 3, 4, or 8 byte prefixes, either byte order, optional length
+//!   adjustment).
 //! - [`delimiter::Delimited`] for byte-delimited protocols such as newline-
 //!   terminated text.
 //!
