@@ -59,6 +59,14 @@ pub const fn encode_i64(value: i64) -> u64 {
 }
 
 /// Recover the signed `i64` from a zigzag-encoded `u64`.
+///
+/// # Example
+///
+/// ```
+/// use wire_codec::zigzag;
+/// assert_eq!(zigzag::decode_i64(3), -2);
+/// assert_eq!(zigzag::decode_i64(u64::MAX), i64::MIN);
+/// ```
 #[inline]
 pub const fn decode_i64(value: u64) -> i64 {
     ((value >> 1) as i64) ^ -((value & 1) as i64)

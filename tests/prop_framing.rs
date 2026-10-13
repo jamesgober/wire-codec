@@ -9,16 +9,21 @@
 //! - Delimited: encode-then-decode is the identity, with `Frame::consumed`
 //!   counting the delimiter.
 //! - Delimited: arbitrary input bytes never panic the decoder.
+//! - Delimited: a payload containing the delimiter is rejected on encode.
+//! - Delimited: resumable byte-at-a-time decoding finds the same frames as
+//!   one-shot decoding.
 
 use proptest::prelude::*;
-use wire_codec::framing::{Delimited, Endian, Framer, LengthPrefixed, LengthWidth};
-use wire_codec::WriteBuf;
+use wire_codec::framing::{Delimited, Endian, Framer, LengthPrefixed, LengthWidth, StreamDecoder};
+use wire_codec::{Error, WriteBuf};
 
 fn width_strategy() -> impl Strategy<Value = LengthWidth> {
     prop_oneof![
         Just(LengthWidth::U8),
         Just(LengthWidth::U16),
+        Just(LengthWidth::U24),
         Just(LengthWidth::U32),
+        Just(LengthWidth::U64),
     ]
 }
 
@@ -86,6 +91,8 @@ proptest! {
         endian in endian_strategy(),
         bytes in proptest::collection::vec(any::<u8>(), 0..256),
     ) {
+        // Any outcome is acceptable here except a panic; the result is
+        // deliberately discarded.
         let framer = LengthPrefixed::new(width, endian).with_max_payload(64);
         let _ = framer.next_frame(&bytes);
     }
@@ -95,8 +102,8 @@ proptest! {
         delim in proptest::collection::vec(1u8..=255, 1..4),
         payload in proptest::collection::vec(any::<u8>(), 0..256),
     ) {
-        // Skip payloads that themselves contain the delimiter; that case is
-        // tested separately as a protocol error.
+        // Payloads that contain the delimiter are rejected by `write_frame`;
+        // that path is covered by `delimited_rejects_embedded_delimiter`.
         prop_assume!(!contains_subsequence(&payload, &delim));
 
         // Build a stable lifetime for `delim` by leaking it; tiny allocation
@@ -106,12 +113,65 @@ proptest! {
 
         let mut wire = vec![0u8; payload.len() + delim_static.len()];
         let mut buf = WriteBuf::new(&mut wire);
-        framer.write_frame(&payload, &mut buf).unwrap();
-        let written = buf.position();
+        match framer.write_frame(&payload, &mut buf) {
+            Ok(()) => {
+                let written = buf.position();
+                let frame = framer.next_frame(&wire[..written]).unwrap().unwrap();
+                prop_assert_eq!(frame.payload(), payload.as_slice());
+                prop_assert_eq!(frame.consumed(), written);
+            }
+            // A self-overlapping delimiter (e.g. "aa") can merge with the
+            // payload's tail; the framer refuses rather than corrupt it.
+            Err(e) => {
+                prop_assert_eq!(e, Error::DelimiterInPayload);
+                let mut joined = payload.clone();
+                joined.extend_from_slice(delim_static);
+                prop_assert!(find(&joined, delim_static) < Some(payload.len()));
+            }
+        }
+    }
 
-        let frame = framer.next_frame(&wire[..written]).unwrap().unwrap();
-        prop_assert_eq!(frame.payload(), payload.as_slice());
-        prop_assert_eq!(frame.consumed(), written);
+    #[test]
+    fn delimited_rejects_embedded_delimiter(
+        delim in proptest::collection::vec(1u8..=255, 1..4),
+        head in proptest::collection::vec(any::<u8>(), 0..32),
+        tail in proptest::collection::vec(any::<u8>(), 0..32),
+    ) {
+        let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
+        let framer = Delimited::new(delim_static).unwrap();
+        let mut payload = head;
+        payload.extend_from_slice(delim_static);
+        payload.extend_from_slice(&tail);
+        let mut wire = vec![0u8; payload.len() + delim_static.len()];
+        let mut buf = WriteBuf::new(&mut wire);
+        prop_assert_eq!(framer.write_frame(&payload, &mut buf), Err(Error::DelimiterInPayload));
+        prop_assert_eq!(buf.position(), 0);
+    }
+
+    #[test]
+    fn delimited_streaming_matches_batch(
+        delim in proptest::collection::vec(1u8..=4, 1..3),
+        bytes in proptest::collection::vec(0u8..=4, 0..128),
+    ) {
+        // A small alphabet makes delimiters (and near-misses) frequent.
+        let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
+        let framer = Delimited::new(delim_static).unwrap();
+        let mut batch = Vec::new();
+        let mut rest: &[u8] = &bytes;
+        while let Some(frame) = framer.next_frame(rest).unwrap() {
+            batch.push(frame.payload().to_vec());
+            rest = &rest[frame.consumed()..];
+        }
+        let mut decoder = StreamDecoder::new(framer);
+        let mut streamed = Vec::new();
+        let mut start = 0;
+        for end in 0..=bytes.len() {
+            while let Some(frame) = decoder.decode(&bytes[start..end]).unwrap() {
+                streamed.push(frame.payload().to_vec());
+                start += frame.consumed();
+            }
+        }
+        prop_assert_eq!(batch, streamed);
     }
 
     #[test]
@@ -120,9 +180,18 @@ proptest! {
         bytes in proptest::collection::vec(any::<u8>(), 0..256),
     ) {
         let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
+        // Any outcome is acceptable here except a panic; the result is
+        // deliberately discarded.
         let framer = Delimited::new(delim_static).unwrap().with_max_payload(128);
         let _ = framer.next_frame(&bytes);
     }
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if haystack.len() < needle.len() {
+        return None;
+    }
+    (0..=haystack.len() - needle.len()).find(|&i| &haystack[i..i + needle.len()] == needle)
 }
 
 fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {

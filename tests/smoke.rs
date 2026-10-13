@@ -1,7 +1,7 @@
 //! End-to-end smoke tests that exercise the public API together.
 
 use wire_codec::framing::{Delimited, Endian, Framer, LengthPrefixed, LengthWidth};
-use wire_codec::{varint, zigzag, Decode, Encode, ReadBuf, Result, WriteBuf};
+use wire_codec::{Decode, Encode, ReadBuf, Result, WriteBuf, varint, zigzag};
 
 #[test]
 fn version_is_set() {
@@ -16,18 +16,18 @@ struct Record<'a> {
     payload: &'a [u8],
 }
 
-impl<'a> Encode for Record<'a> {
+impl Encode for Record<'_> {
     fn encoded_size(&self) -> usize {
         let zz = zigzag::encode_i64(self.delta);
         varint::encoded_len_u64(zz)
-            + varint::encoded_len_u64(self.payload.len() as u64)
+            + varint::encoded_len_usize(self.payload.len())
             + self.payload.len()
     }
 
     fn encode(&self, buf: &mut WriteBuf<'_>) -> Result<()> {
         let zz = zigzag::encode_i64(self.delta);
         varint::encode_u64(zz, buf)?;
-        varint::encode_u64(self.payload.len() as u64, buf)?;
+        varint::encode_usize(self.payload.len(), buf)?;
         buf.write_bytes(self.payload)
     }
 }
@@ -35,7 +35,7 @@ impl<'a> Encode for Record<'a> {
 impl<'de> Decode<'de> for Record<'de> {
     fn decode(buf: &mut ReadBuf<'de>) -> Result<Self> {
         let delta = zigzag::decode_i64(varint::decode_u64(buf)?);
-        let len = varint::decode_u64(buf)? as usize;
+        let len = varint::decode_usize(buf)?;
         let payload = buf.read_bytes(len)?;
         Ok(Self { delta, payload })
     }

@@ -3,10 +3,36 @@
 //! All fallible APIs in this crate return [`Result<T>`][`crate::Result`], which is
 //! [`core::result::Result<T, Error>`]. The [`Error`] enum is `#[non_exhaustive]`
 //! so future variants can be added without breaking semver.
+//!
+//! # Cursor state on error
+//!
+//! Every read, write, encode, decode, and frame operation in this crate
+//! leaves the [`ReadBuf`][`crate::ReadBuf`] or
+//! [`WriteBuf`][`crate::WriteBuf`] it was given at the position it had
+//! before the call when it returns `Err`. See the crate-level "Error
+//! contract" for which writers also leave the bytes past the cursor
+//! untouched. Use [`ReadBuf::position`][`crate::ReadBuf::position`]
+//! to report where in the input a failure occurred.
 
 use core::fmt;
 
 /// Errors returned by codec and framing operations.
+///
+/// The variants fall into three groups:
+///
+/// - **Need more room or more data:** [`Error::UnexpectedEof`] and
+///   [`Error::BufferFull`]. These are not protocol violations; a streaming
+///   caller can retry once more input has arrived or the output has been
+///   flushed.
+/// - **Hostile or corrupt input:** [`Error::VarintOverflow`],
+///   [`Error::FrameTooLarge`], [`Error::InvalidLengthPrefix`],
+///   [`Error::InvalidEncoding`], and [`Error::ChecksumMismatch`]. The peer
+///   sent bytes that violate the protocol. The usual response is to drop the
+///   connection or discard the datagram; resynchronising inside a corrupted
+///   stream is rarely possible.
+/// - **Caller misuse:** [`Error::BitOverflow`], [`Error::EmptyDelimiter`],
+///   and [`Error::DelimiterInPayload`]. The local program asked for
+///   something the codec cannot represent. Fix the call site.
 ///
 /// # Example
 ///
@@ -17,29 +43,60 @@ use core::fmt;
 /// // Only one byte available but we ask for two.
 /// let result = buf.read_u16_be();
 /// assert!(matches!(result, Err(Error::UnexpectedEof)));
+/// assert_eq!(buf.position(), 0, "the cursor did not move");
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     /// Reader ran out of bytes before the requested value could be decoded.
+    ///
+    /// When decoding a stream, wait for more input and retry the same call.
+    /// When decoding a complete message, the message is truncated.
     UnexpectedEof,
     /// Writer ran out of capacity before the requested value could be encoded.
+    ///
+    /// Flush or grow the output buffer and retry. The cursor did not move,
+    /// and the crate's own writers check room before writing, so they leave
+    /// the buffer untouched (see the crate-level error contract for the
+    /// composite exceptions).
     BufferFull,
-    /// A varint exceeded the maximum encoded length for its target width.
+    /// A varint exceeded the maximum encoded length for its target width, or
+    /// its value does not fit in the target type.
+    ///
+    /// The input is corrupt or hostile.
     VarintOverflow,
-    /// A frame's declared length exceeds the configured limit for the framer.
+    /// A frame's length exceeds the configured limit for the framer.
+    ///
+    /// On decode, the peer announced (or, for delimited framing, has already
+    /// sent at least) `len` payload bytes against a limit of `limit`. Treat it
+    /// as hostile input. On encode, the local payload is larger than the
+    /// framer allows. Both fields saturate at `usize::MAX`.
     FrameTooLarge {
-        /// Frame length advertised by the protocol.
+        /// Frame payload length advertised by the protocol, or a lower bound
+        /// on it when the exact length is not yet known.
         len: usize,
         /// Configured upper bound enforced by the framer.
         limit: usize,
     },
-    /// A length prefix was structurally invalid (e.g. width zero, or a width
-    /// larger than the codec supports).
+    /// A length prefix was structurally invalid: after applying the framer's
+    /// length adjustment it describes a negative payload length, or a payload
+    /// cannot be represented under the configured adjustment.
     InvalidLengthPrefix,
     /// A delimiter byte sequence was not found within the available input.
+    ///
+    /// Not produced by the built-in framers, which report an over-long
+    /// undelimited input as [`Error::FrameTooLarge`]. Available to custom
+    /// [`Framer`][`crate::framing::Framer`] implementations.
     DelimiterNotFound,
     /// Decoded data violated a structural invariant required by the codec.
+    ///
+    /// Produced by the canonical varint decoders and the varint-prefixed
+    /// framer for overlong encodings, by [`cobs`][`crate::cobs`] decoding
+    /// for malformed blocks, by `bool` decoding for bytes other than `0` and
+    /// `1`, by packed structs whose padding bits are not zero, and by the
+    /// `bytes` codec when a custom framer breaks the
+    /// [`Frame`][`crate::framing::Frame`] contract. The input (or the
+    /// framer) is at fault.
     InvalidEncoding,
     /// A bit-level write requested more bits than the target type can hold,
     /// or a value did not fit in the requested bit width.
@@ -47,6 +104,18 @@ pub enum Error {
     /// A delimited-framer constructor was given an empty delimiter, which
     /// cannot uniquely separate frames.
     EmptyDelimiter,
+    /// A payload passed to a delimited framer's `write_frame` contains the
+    /// delimiter sequence, so the receiver would split it into several frames.
+    ///
+    /// Escape the payload (for example with [`cobs`][`crate::cobs`]) or switch
+    /// to a length-prefixed framer. Nothing was written.
+    DelimiterInPayload,
+    /// A frame's checksum trailer did not match the checksum computed over
+    /// the received bytes.
+    ///
+    /// The frame was corrupted in transit. Discard it. A CRC does not
+    /// authenticate the sender; see [`checksum`][`crate::checksum`].
+    ChecksumMismatch,
 }
 
 impl fmt::Display for Error {
@@ -63,12 +132,121 @@ impl fmt::Display for Error {
             Error::InvalidEncoding => f.write_str("encoded data violates a structural invariant"),
             Error::BitOverflow => f.write_str("bit width or value out of range"),
             Error::EmptyDelimiter => f.write_str("delimiter must be non-empty"),
+            Error::DelimiterInPayload => f.write_str("payload contains the frame delimiter"),
+            Error::ChecksumMismatch => f.write_str("frame checksum mismatch"),
         }
     }
 }
 
+/// Implemented unconditionally, including on `no_std` targets.
+/// `std::error::Error` is the same trait, so `Error` converts into
+/// `Box<dyn std::error::Error>`, `anyhow::Error`, and friends whether or not
+/// the `std` feature is enabled.
+impl core::error::Error for Error {}
+
+/// Convert into an [`std::io::Error`], for use in I/O-based codecs.
+///
+/// The original [`Error`] is kept as the source and can be recovered with
+/// `io::Error::get_ref` and `downcast_ref`. The [`std::io::ErrorKind`] is
+/// chosen by group: [`Error::UnexpectedEof`] maps to `UnexpectedEof`,
+/// [`Error::BufferFull`] to `WriteZero`, caller misuse
+/// ([`Error::BitOverflow`], [`Error::EmptyDelimiter`],
+/// [`Error::DelimiterInPayload`]) to `InvalidInput`, and everything else to
+/// `InvalidData`.
+///
+/// # Example
+///
+/// ```
+/// use std::io;
+/// use wire_codec::Error;
+///
+/// let io_err = io::Error::from(Error::ChecksumMismatch);
+/// assert_eq!(io_err.kind(), io::ErrorKind::InvalidData);
+/// let inner = io_err.get_ref().and_then(|e| e.downcast_ref::<Error>());
+/// assert_eq!(inner, Some(&Error::ChecksumMismatch));
+/// ```
 #[cfg(feature = "std")]
-impl std::error::Error for Error {}
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+impl From<Error> for std::io::Error {
+    fn from(err: Error) -> Self {
+        use std::io::ErrorKind;
+        let kind = match err {
+            Error::UnexpectedEof => ErrorKind::UnexpectedEof,
+            Error::BufferFull => ErrorKind::WriteZero,
+            Error::BitOverflow | Error::EmptyDelimiter | Error::DelimiterInPayload => {
+                ErrorKind::InvalidInput
+            }
+            _ => ErrorKind::InvalidData,
+        };
+        std::io::Error::new(kind, err)
+    }
+}
 
 /// Result alias used throughout the crate.
 pub type Result<T> = core::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_messages_are_distinct_and_non_empty() {
+        let all = [
+            Error::UnexpectedEof,
+            Error::BufferFull,
+            Error::VarintOverflow,
+            Error::FrameTooLarge { len: 9, limit: 4 },
+            Error::InvalidLengthPrefix,
+            Error::DelimiterNotFound,
+            Error::InvalidEncoding,
+            Error::BitOverflow,
+            Error::EmptyDelimiter,
+            Error::DelimiterInPayload,
+            Error::ChecksumMismatch,
+        ];
+        let mut seen: [Option<String>; 11] = Default::default();
+        for (slot, err) in seen.iter_mut().zip(all) {
+            let text = err.to_string();
+            assert!(!text.is_empty());
+            *slot = Some(text);
+        }
+        for i in 0..seen.len() {
+            for j in (i + 1)..seen.len() {
+                assert_ne!(seen[i], seen[j]);
+            }
+        }
+        assert_eq!(
+            Error::FrameTooLarge { len: 9, limit: 4 }.to_string(),
+            "frame length 9 exceeds configured limit 4"
+        );
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn io_error_kinds() {
+        use std::io::{self, ErrorKind};
+        let cases = [
+            (Error::UnexpectedEof, ErrorKind::UnexpectedEof),
+            (Error::BufferFull, ErrorKind::WriteZero),
+            (Error::BitOverflow, ErrorKind::InvalidInput),
+            (Error::EmptyDelimiter, ErrorKind::InvalidInput),
+            (Error::DelimiterInPayload, ErrorKind::InvalidInput),
+            (Error::VarintOverflow, ErrorKind::InvalidData),
+            (Error::InvalidEncoding, ErrorKind::InvalidData),
+        ];
+        for (err, kind) in cases {
+            let io_err = io::Error::from(err);
+            assert_eq!(io_err.kind(), kind);
+            assert_eq!(
+                io_err.get_ref().and_then(|e| e.downcast_ref::<Error>()),
+                Some(&err)
+            );
+        }
+    }
+
+    #[test]
+    fn implements_core_error() {
+        fn takes_error(_: &dyn core::error::Error) {}
+        takes_error(&Error::BufferFull);
+    }
+}
