@@ -15,6 +15,17 @@
 //! exactly where it was. A streaming caller that receives
 //! [`Error::UnexpectedEof`] can append more bytes and retry the same call
 //! without cloning the cursor first.
+//!
+//! # Canonical encodings
+//!
+//! LEB128 allows a value to be padded with redundant `0x80` continuation
+//! bytes followed by a `0x00` terminator (for example `[0x80, 0x00]` is an
+//! overlong encoding of `0`). The plain `decode_*` functions accept these
+//! overlong forms, as Protocol Buffers does. The `decode_*_canonical`
+//! functions reject them with [`Error::InvalidEncoding`], so that every value
+//! has exactly one accepted wire representation. Use the canonical forms when
+//! the encoded bytes are hashed, signed, deduplicated, or compared between
+//! implementations. The encoders always produce the canonical form.
 
 use crate::buf::{ReadBuf, WriteBuf};
 use crate::error::{Error, Result};
@@ -272,7 +283,7 @@ pub fn encode_i64(value: i64, buf: &mut WriteBuf<'_>) -> Result<()> {
 #[inline]
 pub fn decode_u16(buf: &mut ReadBuf<'_>) -> Result<u16> {
     // The width check inside `decode_with` guarantees the value fits.
-    decode_with(buf, MAX_LEN_U16, u16::BITS).map(|v| v as u16)
+    decode_with(buf, MAX_LEN_U16, u16::BITS, false).map(|v| v as u16)
 }
 
 /// Decode a `u32` varint from `buf`.
@@ -294,7 +305,7 @@ pub fn decode_u16(buf: &mut ReadBuf<'_>) -> Result<u16> {
 /// ```
 #[inline]
 pub fn decode_u32(buf: &mut ReadBuf<'_>) -> Result<u32> {
-    decode_with(buf, MAX_LEN_U32, u32::BITS).map(|v| v as u32)
+    decode_with(buf, MAX_LEN_U32, u32::BITS, false).map(|v| v as u32)
 }
 
 /// Decode a `u64` varint from `buf`.
@@ -318,7 +329,7 @@ pub fn decode_u32(buf: &mut ReadBuf<'_>) -> Result<u32> {
 /// ```
 #[inline]
 pub fn decode_u64(buf: &mut ReadBuf<'_>) -> Result<u64> {
-    decode_with(buf, MAX_LEN_U64, u64::BITS)
+    decode_with(buf, MAX_LEN_U64, u64::BITS, false)
 }
 
 /// Decode a `usize` varint from `buf`.
@@ -344,7 +355,7 @@ pub fn decode_u64(buf: &mut ReadBuf<'_>) -> Result<u64> {
 /// ```
 #[inline]
 pub fn decode_usize(buf: &mut ReadBuf<'_>) -> Result<usize> {
-    decode_usize_with(buf)
+    decode_usize_with(buf, false)
 }
 
 /// Decode a zigzag `i32` varint (protobuf `sint32`) from `buf`.
@@ -383,6 +394,129 @@ pub fn decode_i64(buf: &mut ReadBuf<'_>) -> Result<i64> {
     decode_u64(buf).map(zigzag::decode_i64)
 }
 
+/// Decode a `u16` varint, rejecting overlong encodings.
+///
+/// # Errors
+///
+/// Everything [`decode_u16`] returns, plus [`Error::InvalidEncoding`] when
+/// the value is padded with redundant continuation bytes. The cursor is
+/// unchanged on error.
+///
+/// # Example
+///
+/// ```
+/// use wire_codec::{varint, Error, ReadBuf};
+/// let mut buf = ReadBuf::new(&[0x80, 0x00]);
+/// assert_eq!(varint::decode_u16_canonical(&mut buf), Err(Error::InvalidEncoding));
+/// assert_eq!(buf.position(), 0);
+/// ```
+#[inline]
+pub fn decode_u16_canonical(buf: &mut ReadBuf<'_>) -> Result<u16> {
+    decode_with(buf, MAX_LEN_U16, u16::BITS, true).map(|v| v as u16)
+}
+
+/// Decode a `u32` varint, rejecting overlong encodings.
+///
+/// # Errors
+///
+/// Everything [`decode_u32`] returns, plus [`Error::InvalidEncoding`] when
+/// the value is padded with redundant continuation bytes. The cursor is
+/// unchanged on error.
+///
+/// # Example
+///
+/// ```
+/// use wire_codec::{varint, Error, ReadBuf};
+/// // `[0x80, 0x80, 0x80, 0x80, 0x00]` is a five-byte encoding of zero.
+/// let mut buf = ReadBuf::new(&[0x80, 0x80, 0x80, 0x80, 0x00]);
+/// assert_eq!(varint::decode_u32_canonical(&mut buf), Err(Error::InvalidEncoding));
+///
+/// let mut buf = ReadBuf::new(&[0xAC, 0x02]);
+/// assert_eq!(varint::decode_u32_canonical(&mut buf), Ok(300));
+/// ```
+#[inline]
+pub fn decode_u32_canonical(buf: &mut ReadBuf<'_>) -> Result<u32> {
+    decode_with(buf, MAX_LEN_U32, u32::BITS, true).map(|v| v as u32)
+}
+
+/// Decode a `u64` varint, rejecting overlong encodings.
+///
+/// # Errors
+///
+/// Everything [`decode_u64`] returns, plus [`Error::InvalidEncoding`] when
+/// the value is padded with redundant continuation bytes. The cursor is
+/// unchanged on error.
+///
+/// # Example
+///
+/// ```
+/// use wire_codec::{varint, Error, ReadBuf};
+/// let mut buf = ReadBuf::new(&[0x81, 0x00]);
+/// assert_eq!(varint::decode_u64_canonical(&mut buf), Err(Error::InvalidEncoding));
+/// ```
+#[inline]
+pub fn decode_u64_canonical(buf: &mut ReadBuf<'_>) -> Result<u64> {
+    decode_with(buf, MAX_LEN_U64, u64::BITS, true)
+}
+
+/// Decode a `usize` varint, rejecting overlong encodings.
+///
+/// # Errors
+///
+/// Everything [`decode_usize`] returns, plus [`Error::InvalidEncoding`] when
+/// the value is padded with redundant continuation bytes. The cursor is
+/// unchanged on error.
+///
+/// # Example
+///
+/// ```
+/// use wire_codec::{varint, ReadBuf};
+/// let mut buf = ReadBuf::new(&[0x05]);
+/// assert_eq!(varint::decode_usize_canonical(&mut buf), Ok(5));
+/// ```
+#[inline]
+pub fn decode_usize_canonical(buf: &mut ReadBuf<'_>) -> Result<usize> {
+    decode_usize_with(buf, true)
+}
+
+/// Decode a zigzag `i32` varint, rejecting overlong encodings.
+///
+/// # Errors
+///
+/// Same contract as [`decode_u32_canonical`]. The cursor is unchanged on
+/// error.
+///
+/// # Example
+///
+/// ```
+/// use wire_codec::{varint, ReadBuf};
+/// let mut buf = ReadBuf::new(&[0x01]);
+/// assert_eq!(varint::decode_i32_canonical(&mut buf), Ok(-1));
+/// ```
+#[inline]
+pub fn decode_i32_canonical(buf: &mut ReadBuf<'_>) -> Result<i32> {
+    decode_u32_canonical(buf).map(zigzag::decode_i32)
+}
+
+/// Decode a zigzag `i64` varint, rejecting overlong encodings.
+///
+/// # Errors
+///
+/// Same contract as [`decode_u64_canonical`]. The cursor is unchanged on
+/// error.
+///
+/// # Example
+///
+/// ```
+/// use wire_codec::{varint, ReadBuf};
+/// let mut buf = ReadBuf::new(&[0x02]);
+/// assert_eq!(varint::decode_i64_canonical(&mut buf), Ok(1));
+/// ```
+#[inline]
+pub fn decode_i64_canonical(buf: &mut ReadBuf<'_>) -> Result<i64> {
+    decode_u64_canonical(buf).map(zigzag::decode_i64)
+}
+
 /// Encode `value` straight into the unwritten tail of `buf`.
 ///
 /// The length is computed up front, so there is a single capacity check and
@@ -407,15 +541,15 @@ fn encode_raw(mut value: u64, buf: &mut WriteBuf<'_>) -> Result<()> {
 
 /// Decode from `buf`, committing the cursor only on success.
 #[inline(always)]
-fn decode_with(buf: &mut ReadBuf<'_>, max_len: usize, bits: u32) -> Result<u64> {
-    let (value, len) = decode_slice(buf.remaining_slice(), max_len, bits)?;
+fn decode_with(buf: &mut ReadBuf<'_>, max_len: usize, bits: u32, canonical: bool) -> Result<u64> {
+    let (value, len) = decode_slice(buf.remaining_slice(), max_len, bits, canonical)?;
     buf.consume(len);
     Ok(value)
 }
 
 #[inline(always)]
-fn decode_usize_with(buf: &mut ReadBuf<'_>) -> Result<usize> {
-    let (value, len) = decode_slice(buf.remaining_slice(), MAX_LEN_U64, u64::BITS)?;
+fn decode_usize_with(buf: &mut ReadBuf<'_>, canonical: bool) -> Result<usize> {
+    let (value, len) = decode_slice(buf.remaining_slice(), MAX_LEN_U64, u64::BITS, canonical)?;
     let value = usize::try_from(value).map_err(|_| Error::VarintOverflow)?;
     buf.consume(len);
     Ok(value)
@@ -428,7 +562,12 @@ fn decode_usize_with(buf: &mut ReadBuf<'_>) -> Result<usize> {
 /// byte of a maximum-length encoding may only carry `bits - 7 * (max_len - 1)`
 /// payload bits; anything above that overflows the target.
 #[inline(always)]
-fn decode_slice(bytes: &[u8], max_len: usize, bits: u32) -> Result<(u64, usize)> {
+pub(crate) fn decode_slice(
+    bytes: &[u8],
+    max_len: usize,
+    bits: u32,
+    canonical: bool,
+) -> Result<(u64, usize)> {
     let mut value: u64 = 0;
     let mut shift: u32 = 0;
     for i in 0..max_len {
@@ -439,6 +578,9 @@ fn decode_slice(bytes: &[u8], max_len: usize, bits: u32) -> Result<(u64, usize)>
         if byte & 0x80 == 0 {
             if i == max_len - 1 && u32::from(byte) >> (bits - shift) != 0 {
                 return Err(Error::VarintOverflow);
+            }
+            if canonical && byte == 0 && i != 0 {
+                return Err(Error::InvalidEncoding);
             }
             return Ok((value, i + 1));
         }
@@ -460,6 +602,8 @@ mod tests {
         let mut r = ReadBuf::new(&storage[..n]);
         assert_eq!(decode_u32(&mut r).unwrap(), value);
         assert!(r.is_empty());
+        let mut r = ReadBuf::new(&storage[..n]);
+        assert_eq!(decode_u32_canonical(&mut r).unwrap(), value);
     }
 
     fn round_trip_u64(value: u64) {
@@ -471,6 +615,8 @@ mod tests {
         let mut r = ReadBuf::new(&storage[..n]);
         assert_eq!(decode_u64(&mut r).unwrap(), value);
         assert!(r.is_empty());
+        let mut r = ReadBuf::new(&storage[..n]);
+        assert_eq!(decode_u64_canonical(&mut r).unwrap(), value);
     }
 
     #[test]
@@ -516,6 +662,8 @@ mod tests {
             assert_eq!(n, encoded_len_u16(v));
             let mut r = ReadBuf::new(&storage[..n]);
             assert_eq!(decode_u16(&mut r).unwrap(), v);
+            let mut r = ReadBuf::new(&storage[..n]);
+            assert_eq!(decode_u16_canonical(&mut r).unwrap(), v);
         }
         // 0x04 in the third byte is bit 16: one past u16::MAX.
         let mut r = ReadBuf::new(&[0xFF, 0xFF, 0x04]);
@@ -533,6 +681,10 @@ mod tests {
             let n = w.position();
             assert_eq!(n, encoded_len_i32(v));
             assert_eq!(decode_i32(&mut ReadBuf::new(&storage[..n])).unwrap(), v);
+            assert_eq!(
+                decode_i32_canonical(&mut ReadBuf::new(&storage[..n])).unwrap(),
+                v
+            );
         }
         for v in [0i64, 1, -1, i64::from(i32::MIN) - 1, i64::MAX, i64::MIN] {
             let mut storage = [0u8; MAX_LEN_U64];
@@ -541,6 +693,10 @@ mod tests {
             let n = w.position();
             assert_eq!(n, encoded_len_i64(v));
             assert_eq!(decode_i64(&mut ReadBuf::new(&storage[..n])).unwrap(), v);
+            assert_eq!(
+                decode_i64_canonical(&mut ReadBuf::new(&storage[..n])).unwrap(),
+                v
+            );
         }
     }
 
@@ -553,6 +709,10 @@ mod tests {
             let n = w.position();
             assert_eq!(n, encoded_len_usize(v));
             assert_eq!(decode_usize(&mut ReadBuf::new(&storage[..n])).unwrap(), v);
+            assert_eq!(
+                decode_usize_canonical(&mut ReadBuf::new(&storage[..n])).unwrap(),
+                v
+            );
         }
     }
 
@@ -605,8 +765,12 @@ mod tests {
         bytes[9] = 0x01;
         assert_eq!(decode_u64(&mut ReadBuf::new(&bytes)), Ok(u64::MAX));
         bytes[9] = 0x00;
-        // An overlong (padded) form is accepted.
+        // Lenient accepts the overlong form; canonical rejects it.
         assert_eq!(decode_u64(&mut ReadBuf::new(&bytes)), Ok(u64::MAX >> 1));
+        assert_eq!(
+            decode_u64_canonical(&mut ReadBuf::new(&bytes)),
+            Err(Error::InvalidEncoding)
+        );
     }
 
     #[test]
@@ -639,6 +803,28 @@ mod tests {
         };
         assert_eq!(value, 300);
         assert_eq!(filled, 2);
+    }
+
+    #[test]
+    fn overlong_forms() {
+        let cases: [&[u8]; 4] = [
+            &[0x80, 0x00],
+            &[0x81, 0x00],
+            &[0x80, 0x80, 0x80, 0x80, 0x00],
+            &[0xFF, 0x80, 0x00],
+        ];
+        for bytes in cases {
+            assert!(decode_u32(&mut ReadBuf::new(bytes)).is_ok());
+            let mut r = ReadBuf::new(bytes);
+            assert_eq!(decode_u32_canonical(&mut r), Err(Error::InvalidEncoding));
+            assert_eq!(r.position(), 0);
+        }
+        // A lone zero byte is the canonical encoding of 0.
+        assert_eq!(decode_u32_canonical(&mut ReadBuf::new(&[0x00])), Ok(0));
+        assert_eq!(
+            decode_usize_canonical(&mut ReadBuf::new(&[0x80, 0x00])),
+            Err(Error::InvalidEncoding)
+        );
     }
 
     #[test]
