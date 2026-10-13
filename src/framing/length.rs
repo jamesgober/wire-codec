@@ -276,36 +276,60 @@ impl LengthPrefixed {
         self.adjustment
     }
 
-    /// Decode the prefix from exactly `header_size()` bytes.
-    fn read_prefix(&self, header: &[u8]) -> u64 {
-        let mut be = [0u8; 8];
-        // Right-align the prefix bytes in big-endian order, so every width
-        // shares one conversion.
-        let n = header.len();
-        match self.endian {
-            Endian::Big => be[8 - n..].copy_from_slice(header),
-            Endian::Little => {
-                for (dst, src) in be[8 - n..].iter_mut().rev().zip(header) {
-                    *dst = *src;
+    /// Decode the prefix from the first `header_size()` bytes of `input`,
+    /// or `None` if fewer bytes are available.
+    #[inline]
+    fn read_prefix(&self, input: &[u8]) -> Option<u64> {
+        let big = matches!(self.endian, Endian::Big);
+        Some(match self.width {
+            LengthWidth::U8 => u64::from(*input.first()?),
+            LengthWidth::U16 => {
+                let b: [u8; 2] = *input.first_chunk()?;
+                u64::from(if big {
+                    u16::from_be_bytes(b)
+                } else {
+                    u16::from_le_bytes(b)
+                })
+            }
+            LengthWidth::U24 => {
+                let [a, b, c] = *input.first_chunk::<3>()?;
+                let word = if big { [0, a, b, c] } else { [a, b, c, 0] };
+                u64::from(if big {
+                    u32::from_be_bytes(word)
+                } else {
+                    u32::from_le_bytes(word)
+                })
+            }
+            LengthWidth::U32 => {
+                let b: [u8; 4] = *input.first_chunk()?;
+                u64::from(if big {
+                    u32::from_be_bytes(b)
+                } else {
+                    u32::from_le_bytes(b)
+                })
+            }
+            LengthWidth::U64 => {
+                let b: [u8; 8] = *input.first_chunk()?;
+                if big {
+                    u64::from_be_bytes(b)
+                } else {
+                    u64::from_le_bytes(b)
                 }
             }
-        }
-        u64::from_be_bytes(be)
+        })
     }
 
     /// Encode `value` (already checked to fit the width) as the prefix.
+    /// Returns the bytes and how many of them are used.
+    #[inline]
     fn prefix_bytes(&self, value: u64) -> ([u8; 8], usize) {
         let n = self.width.header_size();
-        let be = value.to_be_bytes();
-        let mut out = [0u8; 8];
-        match self.endian {
-            Endian::Big => out[..n].copy_from_slice(&be[8 - n..]),
-            Endian::Little => {
-                for (dst, src) in out[..n].iter_mut().zip(be[8 - n..].iter().rev()) {
-                    *dst = *src;
-                }
-            }
-        }
+        // `value` fits in `n` bytes, so after the shift (big endian) or as is
+        // (little endian) the prefix occupies exactly the first `n` bytes.
+        let out = match self.endian {
+            Endian::Big => (value << (8 * (8 - n))).to_be_bytes(),
+            Endian::Little => value.to_le_bytes(),
+        };
         (out, n)
     }
 
@@ -330,17 +354,16 @@ impl Framer for LengthPrefixed {
     ///   prefix into a negative length.
     fn next_frame<'a>(&self, input: &'a [u8]) -> Result<Option<Frame<'a>>> {
         let header_size = self.width.header_size();
-        let Some(header) = input.get(..header_size) else {
+        let Some(raw) = self.read_prefix(input) else {
             return Ok(None);
         };
-        let raw = self.read_prefix(header);
-        // The prefix is attacker-controlled: apply the adjustment in i128 so
-        // neither the addition nor the sign can overflow.
-        let adjusted = i128::from(raw) + i128::from(self.adjustment);
-        if adjusted < 0 {
-            return Err(Error::InvalidLengthPrefix);
-        }
-        let len = u64::try_from(adjusted).unwrap_or(u64::MAX);
+        // The prefix is attacker-controlled: the adjustment is applied with
+        // checked arithmetic, so neither the sum nor its sign can wrap.
+        let len = match raw.checked_add_signed(self.adjustment) {
+            Some(len) => len,
+            None if self.adjustment < 0 => return Err(Error::InvalidLengthPrefix),
+            None => return Err(self.too_large(u64::MAX)),
+        };
         if len > self.max_payload {
             return Err(self.too_large(len));
         }
@@ -373,14 +396,19 @@ impl Framer for LengthPrefixed {
         if len > self.max_payload {
             return Err(self.too_large(len));
         }
-        let prefix = i128::from(len) - i128::from(self.adjustment);
-        if prefix < 0 {
-            return Err(Error::InvalidLengthPrefix);
+        // prefix = len - adjustment, in i128 so `-i64::MIN` cannot overflow.
+        let prefix = if self.adjustment == 0 {
+            len
+        } else {
+            let prefix = i128::from(len) - i128::from(self.adjustment);
+            if prefix < 0 {
+                return Err(Error::InvalidLengthPrefix);
+            }
+            u64::try_from(prefix).unwrap_or(u64::MAX)
+        };
+        if prefix > self.width.max_payload() {
+            return Err(self.too_large(len));
         }
-        let prefix = u64::try_from(prefix)
-            .ok()
-            .filter(|&p| p <= self.width.max_payload())
-            .ok_or_else(|| self.too_large(len))?;
         let (header, header_len) = self.prefix_bytes(prefix);
         let total = payload
             .len()
@@ -488,7 +516,8 @@ mod tests {
         ];
         for (width, endian, header) in cases {
             let framer = LengthPrefixed::new(width, endian);
-            assert_eq!(framer.read_prefix(header), 0x0102);
+            assert_eq!(framer.read_prefix(header), Some(0x0102));
+            assert_eq!(framer.read_prefix(&header[1..]), None);
             let (bytes, n) = framer.prefix_bytes(0x0102);
             assert_eq!(&bytes[..n], header);
             let mut buf = WriteBuf::new(&mut out);
