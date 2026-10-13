@@ -93,38 +93,38 @@ impl<'d> Delimited<'d> {
 }
 
 impl Framer for Delimited<'_> {
+    /// Extract the bytes up to the first delimiter.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FrameTooLarge`] once more than
+    /// `max_payload + delimiter.len()` bytes are buffered without a
+    /// delimiter starting at or before offset `max_payload`. The `len` field
+    /// is then a lower bound (`max_payload + 1`): the true length is unknown
+    /// because the frame has not ended yet.
     fn next_frame<'a>(&self, input: &'a [u8]) -> Result<Option<Frame<'a>>> {
-        // Cap the search window at max_payload + delimiter length. Saturating
-        // because the default max_payload is usize::MAX.
-        let window_cap = self.max_payload.saturating_add(self.delimiter.len());
-        let scan_window = if input.len() > window_cap {
+        let delim_len = self.delimiter.len();
+        // A valid delimiter starts at offset <= max_payload, so it ends within
+        // `max_payload + delim_len` bytes. Saturating because the unbounded
+        // default is usize::MAX.
+        let window_cap = self.max_payload.saturating_add(delim_len);
+        let window = if input.len() > window_cap {
             &input[..window_cap]
         } else {
             input
         };
-        match self.find_delimiter(scan_window) {
-            Some(pos) => {
-                if pos > self.max_payload {
-                    return Err(Error::FrameTooLarge {
-                        len: pos,
-                        limit: self.max_payload,
-                    });
-                }
-                let consumed = pos + self.delimiter.len();
-                Ok(Some(Frame::new(&input[..pos], consumed)))
-            }
-            None => {
-                // No delimiter inside the window, and the input has already
-                // exceeded the limit: the protocol is broken.
-                if input.len() > window_cap {
-                    return Err(Error::FrameTooLarge {
-                        len: input.len(),
-                        limit: self.max_payload,
-                    });
-                }
-                Ok(None)
-            }
+        if let Some(pos) = self.find_delimiter(window) {
+            return Ok(Some(Frame::new(&input[..pos], pos + delim_len)));
         }
+        if input.len() > window_cap {
+            // No delimiter inside the window and the input has already run
+            // past it: the payload is at least max_payload + 1 bytes long.
+            return Err(Error::FrameTooLarge {
+                len: self.max_payload.saturating_add(1),
+                limit: self.max_payload,
+            });
+        }
+        Ok(None)
     }
 
     fn write_frame(&self, payload: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
@@ -166,6 +166,14 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_delimiter_prefix() {
+        let framer = Delimited::new(b"\r\n").unwrap();
+        let frame = framer.next_frame(b"ab\r\r\ncd").unwrap().unwrap();
+        assert_eq!(frame.payload(), b"ab\r");
+        assert_eq!(frame.consumed(), 5);
+    }
+
+    #[test]
     fn no_delimiter_returns_none() {
         let framer = Delimited::new(b"\n").unwrap();
         assert_eq!(framer.next_frame(b"no terminator here").unwrap(), None);
@@ -178,7 +186,37 @@ mod tests {
         // framer bails with FrameTooLarge instead of scanning to the end.
         let framer = Delimited::new(b"\n").unwrap().with_max_payload(3);
         let result = framer.next_frame(b"abcde\n");
-        assert!(matches!(result, Err(Error::FrameTooLarge { limit: 3, .. })));
+        assert_eq!(result, Err(Error::FrameTooLarge { len: 4, limit: 3 }));
+    }
+
+    #[test]
+    fn read_limit_boundaries() {
+        let framer = Delimited::new(b"\r\n").unwrap().with_max_payload(3);
+        // Exactly max_payload bytes of payload is accepted.
+        let frame = framer.next_frame(b"abc\r\n").unwrap().unwrap();
+        assert_eq!(frame.payload(), b"abc");
+        // max_payload + delimiter bytes without a delimiter: still waiting,
+        // because the delimiter could start at offset 3.
+        assert_eq!(framer.next_frame(b"abc\r"), Ok(None));
+        assert_eq!(framer.next_frame(b"abcd\r"), Ok(None));
+        // One byte past the window without a delimiter: too large.
+        assert_eq!(
+            framer.next_frame(b"abcd\r\n"),
+            Err(Error::FrameTooLarge { len: 4, limit: 3 })
+        );
+    }
+
+    #[test]
+    fn write_limit_boundaries() {
+        let framer = Delimited::new(b"\n").unwrap().with_max_payload(3);
+        let mut storage = [0u8; 16];
+        let mut buf = WriteBuf::new(&mut storage);
+        framer.write_frame(b"abc", &mut buf).unwrap();
+        assert_eq!(
+            framer.write_frame(b"abcd", &mut buf),
+            Err(Error::FrameTooLarge { len: 4, limit: 3 })
+        );
+        assert_eq!(buf.written(), b"abc\n");
     }
 
     #[test]
