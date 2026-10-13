@@ -15,6 +15,9 @@
 //!   gRPC-style transports.
 //! - [`delimiter::Delimited`] for byte-delimited protocols such as newline-
 //!   terminated text.
+//! - [`checksummed::Checksummed`], a decorator that appends and verifies a
+//!   CRC (or any [`Checksum`][`crate::checksum::Checksum`]) after the frames
+//!   of any other framer.
 //!
 //! Custom framers are implemented by writing a `Framer` impl on a user-defined
 //! type.
@@ -32,11 +35,13 @@
 //! keeps the total work linear in the input size even when a peer drips one
 //! byte at a time.
 
+pub mod checksummed;
 pub mod delimiter;
 pub mod length;
 mod search;
 pub mod varint_prefixed;
 
+pub use checksummed::{ChecksumScope, Checksummed};
 pub use delimiter::Delimited;
 pub use length::{Endian, LengthPrefixed, LengthWidth};
 pub use varint_prefixed::VarintPrefixed;

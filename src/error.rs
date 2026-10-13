@@ -23,8 +23,8 @@ use core::fmt;
 ///   caller can retry once more input has arrived or the output has been
 ///   flushed.
 /// - **Hostile or corrupt input:** [`Error::VarintOverflow`],
-///   [`Error::FrameTooLarge`], [`Error::InvalidLengthPrefix`], and
-///   [`Error::InvalidEncoding`]. The peer
+///   [`Error::FrameTooLarge`], [`Error::InvalidLengthPrefix`],
+///   [`Error::InvalidEncoding`], and [`Error::ChecksumMismatch`]. The peer
 ///   sent bytes that violate the protocol. The usual response is to drop the
 ///   connection or discard the datagram; resynchronising inside a corrupted
 ///   stream is rarely possible.
@@ -100,6 +100,12 @@ pub enum Error {
     /// Escape the payload or switch to a length-prefixed framer. Nothing was
     /// written.
     DelimiterInPayload,
+    /// A frame's checksum trailer did not match the checksum computed over
+    /// the received bytes.
+    ///
+    /// The frame was corrupted in transit. Discard it. A CRC does not
+    /// authenticate the sender; see [`checksum`][`crate::checksum`].
+    ChecksumMismatch,
 }
 
 impl fmt::Display for Error {
@@ -117,6 +123,7 @@ impl fmt::Display for Error {
             Error::BitOverflow => f.write_str("bit width or value out of range"),
             Error::EmptyDelimiter => f.write_str("delimiter must be non-empty"),
             Error::DelimiterInPayload => f.write_str("payload contains the frame delimiter"),
+            Error::ChecksumMismatch => f.write_str("frame checksum mismatch"),
         }
     }
 }
@@ -147,8 +154,9 @@ mod tests {
             Error::BitOverflow,
             Error::EmptyDelimiter,
             Error::DelimiterInPayload,
+            Error::ChecksumMismatch,
         ];
-        let mut seen: [Option<String>; 10] = Default::default();
+        let mut seen: [Option<String>; 11] = Default::default();
         for (slot, err) in seen.iter_mut().zip(all) {
             let text = err.to_string();
             assert!(!text.is_empty());

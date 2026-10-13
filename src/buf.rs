@@ -353,6 +353,14 @@ impl<'a> WriteBuf<'a> {
         self.pos += n;
     }
 
+    /// Roll the write position back to `pos`, discarding everything written
+    /// after it. Used to keep multi-step writes atomic on error.
+    #[inline]
+    pub(crate) fn rewind(&mut self, pos: usize) {
+        debug_assert!(pos <= self.pos);
+        self.pos = pos;
+    }
+
     /// Consume the cursor and return the prefix that has been written.
     #[inline]
     pub fn into_written(self) -> &'a mut [u8] {

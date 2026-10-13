@@ -10,7 +10,8 @@
 //! | [`Crc32`] | CRC-32/ISO-HDLC (IEEE 802.3, zlib, PNG) | 4 bytes | Ethernet, gzip, general purpose |
 //! | [`Crc32c`] | CRC-32/ISCSI (Castagnoli) | 4 bytes | iSCSI, SCTP, ext4, Kafka record batches |
 //!
-//! Implement [`Checksum`]
+//! Pair a checksum with any framer through
+//! [`Checksummed`][`crate::framing::Checksummed`]. Implement [`Checksum`]
 //! yourself to plug in a different algorithm (for example a hardware CRC
 //! unit on a microcontroller).
 //!
