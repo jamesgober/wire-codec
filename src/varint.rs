@@ -523,19 +523,21 @@ pub fn decode_i64_canonical(buf: &mut ReadBuf<'_>) -> Result<i64> {
 /// nothing is written when it fails.
 #[inline(always)]
 fn encode_raw(mut value: u64, buf: &mut WriteBuf<'_>) -> Result<()> {
-    let len = encoded_len_u64(value);
-    let Some(dst) = buf.spare_mut().get_mut(..len) else {
+    let dst = buf.spare_mut();
+    // With room for the longest encoding the length check is skipped; the
+    // common case (a large output buffer) pays one comparison.
+    if dst.len() < MAX_LEN_U64 && dst.len() < encoded_len_u64(value) {
         return Err(Error::BufferFull);
-    };
-    // `encoded_len_u64` is always in `1..=10`, so `last` is in bounds.
-    let last = len - 1;
-    for byte in &mut dst[..last] {
-        // Truncation to the low 7 bits is the encoding itself.
-        *byte = (value as u8) | 0x80;
-        value >>= 7;
     }
-    dst[last] = value as u8;
-    buf.commit(len);
+    let mut i = 0;
+    while value >= 0x80 {
+        // Truncation to the low 7 bits is the encoding itself.
+        dst[i] = (value as u8) | 0x80;
+        value >>= 7;
+        i += 1;
+    }
+    dst[i] = value as u8;
+    buf.commit(i + 1);
     Ok(())
 }
 
