@@ -118,14 +118,14 @@ impl Encode for Event<'_> {
     fn encoded_size(&self) -> usize {
         varint::encoded_len_u64(zigzag::encode_i64(self.timestamp_delta))
             + varint::encoded_len_u32(self.sensor_id)
-            + varint::encoded_len_u64(self.payload.len() as u64)
+            + varint::encoded_len_usize(self.payload.len())
             + self.payload.len()
     }
 
     fn encode(&self, buf: &mut WriteBuf<'_>) -> Result<()> {
         varint::encode_u64(zigzag::encode_i64(self.timestamp_delta), buf)?;
         varint::encode_u32(self.sensor_id, buf)?;
-        varint::encode_u64(self.payload.len() as u64, buf)?;
+        varint::encode_usize(self.payload.len(), buf)?;
         buf.write_bytes(self.payload)
     }
 }
@@ -134,7 +134,7 @@ impl<'de> Decode<'de> for Event<'de> {
     fn decode(buf: &mut ReadBuf<'de>) -> Result<Self> {
         let timestamp_delta = zigzag::decode_i64(varint::decode_u64(buf)?);
         let sensor_id = varint::decode_u32(buf)?;
-        let len = varint::decode_u64(buf)? as usize;
+        let len = varint::decode_usize(buf)?;
         let payload = buf.read_bytes(len)?;
         Ok(Self {
             timestamp_delta,

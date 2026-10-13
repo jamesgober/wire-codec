@@ -20,14 +20,14 @@ impl Encode for Record<'_> {
     fn encoded_size(&self) -> usize {
         let zz = zigzag::encode_i64(self.delta);
         varint::encoded_len_u64(zz)
-            + varint::encoded_len_u64(self.payload.len() as u64)
+            + varint::encoded_len_usize(self.payload.len())
             + self.payload.len()
     }
 
     fn encode(&self, buf: &mut WriteBuf<'_>) -> Result<()> {
         let zz = zigzag::encode_i64(self.delta);
         varint::encode_u64(zz, buf)?;
-        varint::encode_u64(self.payload.len() as u64, buf)?;
+        varint::encode_usize(self.payload.len(), buf)?;
         buf.write_bytes(self.payload)
     }
 }
@@ -35,7 +35,7 @@ impl Encode for Record<'_> {
 impl<'de> Decode<'de> for Record<'de> {
     fn decode(buf: &mut ReadBuf<'de>) -> Result<Self> {
         let delta = zigzag::decode_i64(varint::decode_u64(buf)?);
-        let len = varint::decode_u64(buf)? as usize;
+        let len = varint::decode_usize(buf)?;
         let payload = buf.read_bytes(len)?;
         Ok(Self { delta, payload })
     }
