@@ -223,6 +223,18 @@ impl LengthPrefixed {
     /// [`Error::InvalidLengthPrefix`], and one whose prefix value would not
     /// fit in the width yields [`Error::FrameTooLarge`].
     ///
+    /// The payload limit ([`LengthPrefixed::max_payload`]) is counted in
+    /// payload bytes and is capped at the width's largest prefix value,
+    /// independently of the adjustment. Two consequences:
+    ///
+    /// - A negative adjustment lowers the largest payload that can be
+    ///   written to `width maximum + adjustment` (254 bytes for a
+    ///   self-counting `U8` prefix). `write_frame` reports that effective
+    ///   bound as the `limit` of [`Error::FrameTooLarge`].
+    /// - A positive adjustment does not raise the limit: payloads longer
+    ///   than [`LengthWidth::max_payload`] are rejected even though the
+    ///   adjusted prefix could describe them.
+    ///
     /// # Example
     ///
     /// ```
@@ -407,7 +419,13 @@ impl Framer for LengthPrefixed {
             u64::try_from(prefix).unwrap_or(u64::MAX)
         };
         if prefix > self.width.max_payload() {
-            return Err(self.too_large(len));
+            // Report the largest payload this width and adjustment can carry.
+            let effective = i128::from(self.width.max_payload()) + i128::from(self.adjustment);
+            let effective = u64::try_from(effective.max(0)).unwrap_or(u64::MAX);
+            return Err(Error::FrameTooLarge {
+                len: saturate_usize(len),
+                limit: saturate_usize(effective.min(self.max_payload)),
+            });
         }
         let (header, header_len) = self.prefix_bytes(prefix);
         let total = payload
@@ -674,8 +692,26 @@ mod tests {
             framer.write_frame(&[0u8; 255], &mut buf),
             Err(Error::FrameTooLarge { .. })
         ));
+        // The error names the effective bound, not the configured 255.
+        assert_eq!(
+            framer.write_frame(&[0u8; 255], &mut buf),
+            Err(Error::FrameTooLarge {
+                len: 255,
+                limit: 254
+            })
+        );
         framer.write_frame(&[0u8; 254], &mut buf).unwrap();
         assert_eq!(buf.written()[0], 255);
+        // A positive adjustment does not raise the payload limit.
+        let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big).with_length_adjustment(2);
+        assert_eq!(framer.max_payload(), 255);
+        assert_eq!(
+            framer.next_frame(&[0xFF]),
+            Err(Error::FrameTooLarge {
+                len: 257,
+                limit: 255
+            })
+        );
     }
 
     #[test]
