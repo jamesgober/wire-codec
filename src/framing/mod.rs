@@ -13,6 +13,12 @@
 //!
 //! Custom framers are implemented by writing a `Framer` impl on a user-defined
 //! type.
+//!
+//! # Untrusted input
+//!
+//! A framer only guards memory if it has a limit. Use
+//! [`Delimited::bounded`] or `with_max_payload` for any stream that comes
+//! from a peer you do not control.
 
 pub mod delimiter;
 pub mod length;
