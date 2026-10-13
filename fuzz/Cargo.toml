@@ -1,0 +1,78 @@
+[package]
+name = "wire-codec-fuzz"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+description = "cargo-fuzz targets for wire-codec (not published)."
+license = "Apache-2.0 OR MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+wire-codec = { path = ".." }
+
+# Keep this crate out of any parent workspace.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "varint"
+path = "fuzz_targets/varint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "length_prefixed"
+path = "fuzz_targets/length_prefixed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "delimited"
+path = "fuzz_targets/delimited.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "varint_prefixed"
+path = "fuzz_targets/varint_prefixed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "checksummed"
+path = "fuzz_targets/checksummed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bitfield"
+path = "fuzz_targets/bitfield.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cobs"
+path = "fuzz_targets/cobs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "packed"
+path = "fuzz_targets/packed.rs"
+test = false
+doc = false
+bench = false
