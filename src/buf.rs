@@ -99,6 +99,16 @@ impl<'a> ReadBuf<'a> {
         Ok(())
     }
 
+    /// Advance past `n` bytes that the caller has already validated.
+    ///
+    /// Crate-internal fast path for decoders that parse from
+    /// [`ReadBuf::remaining_slice`] and commit only on success.
+    #[inline]
+    pub(crate) fn consume(&mut self, n: usize) {
+        debug_assert!(n <= self.remaining());
+        self.pos += n;
+    }
+
     /// Read a single byte.
     ///
     /// # Errors
@@ -325,6 +335,22 @@ impl<'a> WriteBuf<'a> {
     #[inline]
     pub fn write_u64_le(&mut self, value: u64) -> Result<()> {
         self.write_bytes(&value.to_le_bytes())
+    }
+
+    /// Mutable view of the unwritten tail of the buffer.
+    ///
+    /// Crate-internal: encoders write directly into this slice, then call
+    /// [`WriteBuf::commit`] with the number of bytes they produced.
+    #[inline]
+    pub(crate) fn spare_mut(&mut self) -> &mut [u8] {
+        &mut self.bytes[self.pos..]
+    }
+
+    /// Mark `n` bytes of [`WriteBuf::spare_mut`] as written.
+    #[inline]
+    pub(crate) fn commit(&mut self, n: usize) {
+        debug_assert!(n <= self.remaining());
+        self.pos += n;
     }
 
     /// Consume the cursor and return the prefix that has been written.
