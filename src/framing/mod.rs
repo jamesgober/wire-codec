@@ -101,6 +101,9 @@ pub trait Framer {
 
     /// Serialize `payload` as a single frame into `out`.
     ///
+    /// The built-in framers are atomic: on error, `out` is left at its
+    /// original position.
+    ///
     /// # Errors
     ///
     /// Implementation-defined; see each concrete framer.

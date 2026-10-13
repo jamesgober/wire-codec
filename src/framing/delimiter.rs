@@ -174,9 +174,10 @@ impl Framer for Delimited<'_> {
     /// - [`Error::FrameTooLarge`] if `payload` exceeds the configured limit.
     /// - [`Error::DelimiterInPayload`] if `payload` contains the delimiter,
     ///   because the receiver would split it into more than one frame.
-    ///   Nothing is written in that case.
     /// - [`Error::BufferFull`] if `out` cannot hold the payload and the
     ///   delimiter.
+    ///
+    /// Nothing is written on error.
     fn write_frame(&self, payload: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
         if payload.len() > self.max_payload {
             return Err(Error::FrameTooLarge {
@@ -186,6 +187,13 @@ impl Framer for Delimited<'_> {
         }
         if search::find(payload, self.delimiter, 0).is_some() {
             return Err(Error::DelimiterInPayload);
+        }
+        let total = payload
+            .len()
+            .checked_add(self.delimiter.len())
+            .ok_or(Error::BufferFull)?;
+        if total > out.remaining() {
+            return Err(Error::BufferFull);
         }
         out.write_bytes(payload)?;
         out.write_bytes(self.delimiter)
@@ -339,6 +347,17 @@ mod tests {
         let frame = framer.next_frame(&storage[..n]).unwrap().unwrap();
         assert_eq!(frame.payload(), b"a\rb\nc");
         assert_eq!(frame.consumed(), n);
+    }
+
+    #[test]
+    fn write_is_atomic_on_buffer_full() {
+        let framer = Delimited::new(b"\r\n").unwrap();
+        let mut storage = [0u8; 4];
+        let mut buf = WriteBuf::new(&mut storage);
+        assert_eq!(framer.write_frame(b"abc", &mut buf), Err(Error::BufferFull));
+        assert_eq!(buf.position(), 0);
+        framer.write_frame(b"ab", &mut buf).unwrap();
+        assert_eq!(buf.position(), 4);
     }
 
     #[test]
