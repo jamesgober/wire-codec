@@ -112,12 +112,25 @@ impl Framer for Delimited<'_> {
         Ok(None)
     }
 
+    /// Serialize `payload` followed by the delimiter.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::FrameTooLarge`] if `payload` exceeds the configured limit.
+    /// - [`Error::DelimiterInPayload`] if `payload` contains the delimiter,
+    ///   because the receiver would split it into more than one frame.
+    ///   Nothing is written in that case.
+    /// - [`Error::BufferFull`] if `out` cannot hold the payload and the
+    ///   delimiter.
     fn write_frame(&self, payload: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
         if payload.len() > self.max_payload {
             return Err(Error::FrameTooLarge {
                 len: payload.len(),
                 limit: self.max_payload,
             });
+        }
+        if search::find(payload, self.delimiter, 0).is_some() {
+            return Err(Error::DelimiterInPayload);
         }
         out.write_bytes(payload)?;
         out.write_bytes(self.delimiter)
@@ -202,6 +215,24 @@ mod tests {
             Err(Error::FrameTooLarge { len: 4, limit: 3 })
         );
         assert_eq!(buf.written(), b"abc\n");
+    }
+
+    #[test]
+    fn write_rejects_delimiter_inside_payload() {
+        let framer = Delimited::new(b"\r\n").unwrap();
+        let mut storage = [0u8; 16];
+        let mut buf = WriteBuf::new(&mut storage);
+        assert_eq!(
+            framer.write_frame(b"a\r\nb", &mut buf),
+            Err(Error::DelimiterInPayload)
+        );
+        assert_eq!(buf.position(), 0, "nothing is written on error");
+        // A lone '\r' or '\n' is not the delimiter.
+        framer.write_frame(b"a\rb\nc", &mut buf).unwrap();
+        let n = buf.position();
+        let frame = framer.next_frame(&storage[..n]).unwrap().unwrap();
+        assert_eq!(frame.payload(), b"a\rb\nc");
+        assert_eq!(frame.consumed(), n);
     }
 
     #[test]

@@ -28,9 +28,9 @@ use core::fmt;
 ///   sent bytes that violate the protocol. The usual response is to drop the
 ///   connection or discard the datagram; resynchronising inside a corrupted
 ///   stream is rarely possible.
-/// - **Caller misuse:** [`Error::BitOverflow`] and [`Error::EmptyDelimiter`].
-///   The local program asked for something the codec cannot represent. Fix
-///   the call site.
+/// - **Caller misuse:** [`Error::BitOverflow`], [`Error::EmptyDelimiter`],
+///   and [`Error::DelimiterInPayload`]. The local program asked for
+///   something the codec cannot represent. Fix the call site.
 ///
 /// # Example
 ///
@@ -95,6 +95,12 @@ pub enum Error {
     /// A delimited-framer constructor was given an empty delimiter, which
     /// cannot uniquely separate frames.
     EmptyDelimiter,
+    /// A payload passed to a delimited framer's `write_frame` contains the
+    /// delimiter sequence, so the receiver would split it into several frames.
+    ///
+    /// Escape the payload or switch to a length-prefixed framer. Nothing was
+    /// written.
+    DelimiterInPayload,
 }
 
 impl fmt::Display for Error {
@@ -111,6 +117,7 @@ impl fmt::Display for Error {
             Error::InvalidEncoding => f.write_str("encoded data violates a structural invariant"),
             Error::BitOverflow => f.write_str("bit width or value out of range"),
             Error::EmptyDelimiter => f.write_str("delimiter must be non-empty"),
+            Error::DelimiterInPayload => f.write_str("payload contains the frame delimiter"),
         }
     }
 }
@@ -140,8 +147,9 @@ mod tests {
             Error::InvalidEncoding,
             Error::BitOverflow,
             Error::EmptyDelimiter,
+            Error::DelimiterInPayload,
         ];
-        let mut seen: [Option<String>; 9] = Default::default();
+        let mut seen: [Option<String>; 10] = Default::default();
         for (slot, err) in seen.iter_mut().zip(all) {
             let text = err.to_string();
             assert!(!text.is_empty());
