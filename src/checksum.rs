@@ -2,7 +2,8 @@
 //!
 //! The [`Checksum`] trait describes an integrity check that produces a fixed
 //! number of bytes. Three common CRCs are built in, implemented locally with
-//! `const`-generated lookup tables so the crate stays dependency-free:
+//! `const`-generated lookup tables (slice-by-8 for the CRC-32 variants) so
+//! the crate stays dependency-free:
 //!
 //! | Type | Algorithm (catalogue name) | Width | Typical use |
 //! | ---- | -------------------------- | ----- | ----------- |
@@ -169,16 +170,34 @@ pub fn crc32c(data: &[u8]) -> u32 {
 }
 
 #[inline]
-fn reflected_crc32(table: &[u32; 256], data: &[u8]) -> u32 {
-    !data.iter().fold(!0u32, |crc, &byte| {
-        let index = usize::from(crc as u8 ^ byte);
-        (crc >> 8) ^ table[index]
-    })
+fn reflected_crc32(tables: &[[u32; 256]; 8], data: &[u8]) -> u32 {
+    // Slice-by-8: fold eight input bytes per step through eight derived
+    // tables, then finish the tail one byte at a time.
+    let mut crc = !0u32;
+    let mut chunks = data.chunks_exact(8);
+    for chunk in &mut chunks {
+        let mut word = [0u8; 8];
+        word.copy_from_slice(chunk);
+        let lo = u32::from_le_bytes([word[0], word[1], word[2], word[3]]) ^ crc;
+        let hi = u32::from_le_bytes([word[4], word[5], word[6], word[7]]);
+        crc = tables[7][usize::from(lo as u8)]
+            ^ tables[6][usize::from((lo >> 8) as u8)]
+            ^ tables[5][usize::from((lo >> 16) as u8)]
+            ^ tables[4][usize::from((lo >> 24) as u8)]
+            ^ tables[3][usize::from(hi as u8)]
+            ^ tables[2][usize::from((hi >> 8) as u8)]
+            ^ tables[1][usize::from((hi >> 16) as u8)]
+            ^ tables[0][usize::from((hi >> 24) as u8)];
+    }
+    for &byte in chunks.remainder() {
+        crc = (crc >> 8) ^ tables[0][usize::from(crc as u8 ^ byte)];
+    }
+    !crc
 }
 
 static CRC16_CCITT_TABLE: [u16; 256] = crc16_table(0x1021);
-static CRC32_TABLE: [u32; 256] = reflected_crc32_table(0xEDB8_8320);
-static CRC32C_TABLE: [u32; 256] = reflected_crc32_table(0x82F6_3B78);
+static CRC32_TABLE: [[u32; 256]; 8] = slice_by_8(reflected_crc32_table(0xEDB8_8320));
+static CRC32C_TABLE: [[u32; 256]; 8] = slice_by_8(reflected_crc32_table(0x82F6_3B78));
 
 /// Byte-wise lookup table for an MSB-first (non-reflected) CRC-16.
 const fn crc16_table(poly: u16) -> [u16; 256] {
@@ -199,6 +218,24 @@ const fn crc16_table(poly: u16) -> [u16; 256] {
         i += 1;
     }
     table
+}
+
+/// Derive the eight slice-by-8 tables from the byte-wise table:
+/// `tables[k][i]` is the CRC contribution of byte `i` followed by `k` zeros.
+const fn slice_by_8(base: [u32; 256]) -> [[u32; 256]; 8] {
+    let mut tables = [[0u32; 256]; 8];
+    tables[0] = base;
+    let mut k = 1;
+    while k < 8 {
+        let mut i = 0;
+        while i < 256 {
+            let prev = tables[k - 1][i];
+            tables[k][i] = (prev >> 8) ^ base[(prev & 0xFF) as usize];
+            i += 1;
+        }
+        k += 1;
+    }
+    tables
 }
 
 /// Byte-wise lookup table for an LSB-first (reflected) CRC-32.
