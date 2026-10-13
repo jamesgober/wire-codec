@@ -16,6 +16,7 @@
 
 pub mod delimiter;
 pub mod length;
+mod search;
 
 pub use delimiter::Delimited;
 pub use length::{Endian, LengthPrefixed, LengthWidth};

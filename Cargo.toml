@@ -39,9 +39,19 @@ path = "src/lib.rs"
 
 [features]
 default = ["std"]
-std = []
+# Links the standard library. Also enables runtime CPU feature detection in
+# the optional `memchr` dependency (AVX2 on x86_64).
+std = ["memchr?/std"]
+# Delegate delimiter search to the `memchr` crate (SIMD kernels, linear-time
+# multi-byte search). Off by default: the built-in SWAR scan has no deps.
+memchr = ["dep:memchr"]
 
 [dependencies]
+# Optional, off by default. Justification (REPS Dependency Management):
+# BurntSushi's memchr is the de-facto standard SIMD byte search, actively
+# maintained, `no_std`, zero transitive dependencies, MSRV 1.61, and dual
+# MIT/Unlicense. Used only by `framing::Delimited`.
+memchr = { version = "2.7", optional = true, default-features = false }
 
 [dev-dependencies]
 # Property testing (REPS Testing). proptest 1.11 is the newest release whose

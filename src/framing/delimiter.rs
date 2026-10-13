@@ -7,6 +7,7 @@
 
 use crate::buf::WriteBuf;
 use crate::error::{Error, Result};
+use crate::framing::search;
 use crate::framing::{Frame, Framer};
 
 /// Byte-delimited framer.
@@ -74,22 +75,6 @@ impl<'d> Delimited<'d> {
     pub const fn max_payload(&self) -> usize {
         self.max_payload
     }
-
-    fn find_delimiter(&self, haystack: &[u8]) -> Option<usize> {
-        let needle = self.delimiter;
-        if haystack.len() < needle.len() {
-            return None;
-        }
-        let last = haystack.len() - needle.len();
-        let mut i = 0;
-        while i <= last {
-            if &haystack[i..i + needle.len()] == needle {
-                return Some(i);
-            }
-            i += 1;
-        }
-        None
-    }
 }
 
 impl Framer for Delimited<'_> {
@@ -113,7 +98,7 @@ impl Framer for Delimited<'_> {
         } else {
             input
         };
-        if let Some(pos) = self.find_delimiter(window) {
+        if let Some(pos) = search::find(window, self.delimiter, 0) {
             return Ok(Some(Frame::new(&input[..pos], pos + delim_len)));
         }
         if input.len() > window_cap {
