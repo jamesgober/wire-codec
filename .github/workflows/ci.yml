@@ -157,9 +157,11 @@ jobs:
         with:
           tool: cargo-fuzz
       - name: Run every target for 30 seconds
+        # The prebuilt cargo-fuzz binary is a musl build and would default to
+        # its own target triple; fuzz against the runner's glibc target.
         run: |
           for target in $(cargo fuzz list); do
-            cargo fuzz run "$target" -- -max_total_time=30
+            cargo fuzz run --target x86_64-unknown-linux-gnu "$target" -- -max_total_time=30
           done
 
   semver:
@@ -175,6 +177,10 @@ jobs:
   supply-chain:
     name: Supply chain
     runs-on: ubuntu-latest
+    env:
+      # The audit action installs cargo-audit from source; build it with the
+      # latest stable rather than the pinned development toolchain.
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
