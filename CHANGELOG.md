@@ -99,6 +99,12 @@ changes; see "Changed" for the MSRV raise and the behaviour fixes.
   `write_frame` check room before writing, so on error the cursor is where
   it was and nothing was written. Varint decoding is atomic too (1.0
   advanced the cursor past the bytes it had read before failing).
+- `Checksummed::write_frame` and tuple `Encode` impls check the output room
+  before anything else so that a short buffer writes nothing. As a result
+  they report `BufferFull` ahead of a payload error from the inner framer or
+  element (for example `FrameTooLarge` or `DelimiterInPayload`); with
+  enough room, those errors are reported as before. Bare `LengthPrefixed`,
+  `VarintPrefixed`, and `Delimited` still report payload errors first.
 - `Delimited` searches with a SWAR first-byte scan (about 60x faster on a
   1 KiB line) instead of a byte-by-byte slice compare.
 - `FrameTooLarge.len` from `Delimited::next_frame` is `max_payload + 1`, a

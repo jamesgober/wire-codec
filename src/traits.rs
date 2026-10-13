@@ -24,7 +24,8 @@
 //! Tuples restore the cursor to where the tuple started if any element
 //! fails. They check the total `encoded_size` against the remaining room
 //! first, so a short buffer is reported as [`Error::BufferFull`] before
-//! anything is written. If a later element fails for another reason (a
+//! anything is written, and before any element gets the chance to report
+//! a different error. If a later element fails for another reason (a
 //! packed field out of range, say), the bytes of the earlier elements remain
 //! behind the restored cursor.
 

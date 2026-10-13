@@ -395,9 +395,10 @@ benchmark target.
 | `StreamDecoder<Delimited>`, 64 KiB line fed 1 byte per call | 155 µs total |
 | `checksum::crc32` / `crc32c` (1 KiB)                   | 0.33 µs (~3 GB/s) |
 | `checksum::crc16_ccitt_false` (1 KiB)                  | 1.85 µs         |
-| `cobs::encode` / `cobs::decode` (1 KiB)                | 0.60 / 0.72 µs  |
+| `cobs::encode` / `cobs::decode` (1 KiB)                | ≈0.6–0.7 / ≈0.7–1.1 µs |
 
-Numbers are the minimum of four runs. For comparison, 1.0 scanned a 1 KiB
+Numbers are the minimum of four runs; where repeated sessions disagreed by
+more than about 10% a range is given instead. For comparison, 1.0 scanned a 1 KiB
 line in about 1.8 µs and spent about 430 ms on the 64 KiB slow-drip case,
 which is now linear.
 

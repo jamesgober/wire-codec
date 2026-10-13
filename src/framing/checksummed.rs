@@ -184,6 +184,12 @@ impl<F: Framer, C: Checksum> Framer for Checksummed<F, C> {
     ///   checked before anything is written.
     /// - Any error from the inner framer.
     ///
+    /// Because the room is checked first, a short buffer is reported as
+    /// [`Error::BufferFull`] even when the inner framer would also reject
+    /// the payload (with [`Error::FrameTooLarge`] or
+    /// [`Error::DelimiterInPayload`], say); given enough room, the inner
+    /// framer's error is returned instead.
+    ///
     /// The cursor is unchanged on error. With a built-in inner framer
     /// nothing is written either. With a custom inner framer that reports no
     /// size bound, a trailer that does not fit can leave the inner frame's
