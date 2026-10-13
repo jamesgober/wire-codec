@@ -72,7 +72,7 @@
 //!
 //! | Feature | Default | Effect |
 //! | ------- | ------- | ------ |
-//! | `std`   | yes     | Adds `impl std::error::Error for Error`. Drop this feature for `no_std` targets. |
+//! | `std`   | yes     | Links the standard library. Drop this feature for `no_std` targets; [`Error`] implements `core::error::Error` either way. |
 //!
 //! # License
 //!

@@ -67,8 +67,11 @@ impl fmt::Display for Error {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for Error {}
+/// Implemented unconditionally, including on `no_std` targets.
+/// `std::error::Error` is the same trait, so `Error` converts into
+/// `Box<dyn std::error::Error>`, `anyhow::Error`, and friends whether or not
+/// the `std` feature is enabled.
+impl core::error::Error for Error {}
 
 /// Result alias used throughout the crate.
 pub type Result<T> = core::result::Result<T, Error>;
