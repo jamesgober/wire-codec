@@ -3,6 +3,15 @@
 //! Each frame is preceded by a fixed-width unsigned integer that gives the
 //! length of the payload in bytes. The width and endianness are chosen at
 //! construction time.
+//!
+//! # Limits
+//!
+//! [`LengthPrefixed::new`] keeps the 1.0 behaviour: the payload limit is the
+//! largest value the prefix can encode (4 GiB for [`LengthWidth::U32`]). A
+//! caller that buffers until a frame is complete would buffer that much for a
+//! hostile peer. For untrusted input, use [`LengthPrefixed::bounded`] (a
+//! [`LengthPrefixed::DEFAULT_MAX_PAYLOAD`] cap) or
+//! [`LengthPrefixed::with_max_payload`].
 
 use crate::buf::WriteBuf;
 use crate::error::{Error, Result};
@@ -120,10 +129,16 @@ pub struct LengthPrefixed {
 }
 
 impl LengthPrefixed {
+    /// Payload limit applied by [`LengthPrefixed::bounded`]: 8 MiB.
+    ///
+    /// Matches the default of `tokio_util::codec::LengthDelimitedCodec`.
+    pub const DEFAULT_MAX_PAYLOAD: u64 = 8 * 1024 * 1024;
+
     /// Build a framer using the given prefix width and endianness.
     ///
     /// The maximum payload size defaults to the largest value the prefix can
-    /// encode. Use [`LengthPrefixed::with_max_payload`] to tighten it.
+    /// encode. Use [`LengthPrefixed::bounded`] or
+    /// [`LengthPrefixed::with_max_payload`] for untrusted input.
     ///
     /// # Example
     ///
@@ -140,6 +155,29 @@ impl LengthPrefixed {
             endian,
             max_payload: width.max_payload(),
         }
+    }
+
+    /// Build a framer capped at [`LengthPrefixed::DEFAULT_MAX_PAYLOAD`]
+    /// payload bytes (or the width's own maximum, if smaller).
+    ///
+    /// This is the recommended constructor for input from untrusted peers.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::framing::{Endian, LengthPrefixed, LengthWidth};
+    ///
+    /// let framer = LengthPrefixed::bounded(LengthWidth::U32, Endian::Big);
+    /// assert_eq!(framer.max_payload(), LengthPrefixed::DEFAULT_MAX_PAYLOAD);
+    ///
+    /// // A u16 prefix cannot describe more than 65 535 bytes anyway.
+    /// let small = LengthPrefixed::bounded(LengthWidth::U16, Endian::Big);
+    /// assert_eq!(small.max_payload(), 65_535);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn bounded(width: LengthWidth, endian: Endian) -> Self {
+        Self::new(width, endian).with_max_payload(Self::DEFAULT_MAX_PAYLOAD)
     }
 
     /// Override the payload size limit enforced when reading and writing frames.
@@ -439,6 +477,20 @@ mod tests {
             Err(Error::FrameTooLarge { len: 4, limit: 3 })
         );
         assert_eq!(buf.position(), 4);
+    }
+
+    #[test]
+    fn bounded_constructor() {
+        let framer = LengthPrefixed::bounded(LengthWidth::U64, Endian::Big);
+        assert_eq!(framer.max_payload(), LengthPrefixed::DEFAULT_MAX_PAYLOAD);
+        assert_eq!(framer.width(), LengthWidth::U64);
+        assert_eq!(framer.endian(), Endian::Big);
+        let mut input = [0u8; 8];
+        input.copy_from_slice(&(LengthPrefixed::DEFAULT_MAX_PAYLOAD + 1).to_be_bytes());
+        assert!(matches!(
+            framer.next_frame(&input),
+            Err(Error::FrameTooLarge { .. })
+        ));
     }
 
     #[test]

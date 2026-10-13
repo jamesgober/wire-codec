@@ -17,9 +17,10 @@
 //!
 //! # Untrusted input
 //!
-//! A framer only guards memory if it has a limit. Use
-//! [`Delimited::bounded`] or `with_max_payload` for any stream that comes
-//! from a peer you do not control.
+//! A framer only guards memory if it has a limit. Use the `bounded`
+//! constructors ([`LengthPrefixed::bounded`], [`Delimited::bounded`]) or
+//! `with_max_payload` for any stream that comes from a peer you do not
+//! control.
 //!
 //! When bytes arrive in pieces, drive the framer through a [`StreamDecoder`]
 //! (or [`Framer::next_frame_from`]) so that a delimiter search resumes where
