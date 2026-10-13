@@ -12,7 +12,7 @@ authors = [
     "James Gober <me@jamesgober.com>"
 ]
 
-description = "Binary frame codec and protocol codec toolkit. Length-prefixed, varint-prefixed, delimiter-based, checksummed, and custom framing strategies. Built-in varint, zigzag, bitfield, packed struct, CRC, and COBS encoding. Allocation-free, no_std, runtime-agnostic, with optional tokio-util and futures codec adapters."
+description = "Binary frame codec and protocol codec toolkit. Length-prefixed, varint-prefixed, delimiter-based, checksummed, and custom framing strategies. Built-in varint, zigzag, bitfield, packed struct, CRC, and COBS encoding. Allocation-free core, no_std, runtime-agnostic, with optional tokio-util and futures codec adapters."
 
 keywords = [
     "codec",

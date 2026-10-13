@@ -86,8 +86,12 @@ pub enum Error {
     /// Decoded data violated a structural invariant required by the codec.
     ///
     /// Produced by the canonical varint decoders and the varint-prefixed
-    /// framer for overlong encodings, and by [`cobs`][`crate::cobs`]
-    /// decoding for malformed blocks. The input is corrupt or hostile.
+    /// framer for overlong encodings, by [`cobs`][`crate::cobs`] decoding
+    /// for malformed blocks, by `bool` decoding for bytes other than `0` and
+    /// `1`, by packed structs whose padding bits are not zero, and by the
+    /// `bytes` codec when a custom framer breaks the
+    /// [`Frame`][`crate::framing::Frame`] contract. The input (or the
+    /// framer) is at fault.
     InvalidEncoding,
     /// A bit-level write requested more bits than the target type can hold,
     /// or a value did not fit in the requested bit width.
