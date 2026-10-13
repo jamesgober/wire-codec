@@ -141,12 +141,14 @@ impl<'d> Delimited<'d> {
 
     /// Configured delimiter sequence.
     #[inline]
+    #[must_use]
     pub const fn delimiter(&self) -> &'d [u8] {
         self.delimiter
     }
 
     /// Configured maximum payload size.
     #[inline]
+    #[must_use]
     pub const fn max_payload(&self) -> usize {
         self.max_payload
     }

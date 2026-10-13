@@ -67,6 +67,7 @@ impl<'a> Frame<'a> {
     /// Framers in this crate uphold both invariants. The first one is checked
     /// with a `debug_assert!`.
     #[inline]
+    #[must_use]
     pub const fn new(payload: &'a [u8], consumed: usize) -> Self {
         debug_assert!(
             consumed >= payload.len(),
@@ -77,12 +78,14 @@ impl<'a> Frame<'a> {
 
     /// Zero-copy borrow of the frame payload.
     #[inline]
+    #[must_use]
     pub const fn payload(&self) -> &'a [u8] {
         self.payload
     }
 
     /// Number of bytes the framer consumed from the input to produce this frame.
     #[inline]
+    #[must_use]
     pub const fn consumed(&self) -> usize {
         self.consumed
     }
