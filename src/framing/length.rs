@@ -143,6 +143,15 @@ impl LengthPrefixed {
         }
     }
 
+    /// Build a `FrameTooLarge` error, saturating both fields at `usize::MAX`
+    /// so the conversion is lossless-or-saturating on 32-bit targets.
+    fn too_large(&self, len: u64) -> Error {
+        Error::FrameTooLarge {
+            len: saturate_usize(len),
+            limit: saturate_usize(self.max_payload),
+        }
+    }
+
     fn write_prefix(&self, len: u64, out: &mut WriteBuf<'_>) -> Result<()> {
         match (self.width, self.endian) {
             (LengthWidth::U8, _) => out.write_u8(len as u8),
@@ -162,12 +171,17 @@ impl Framer for LengthPrefixed {
         }
         let len = self.read_prefix(&input[..header_size]);
         if len > self.max_payload {
-            return Err(Error::FrameTooLarge {
-                len: len as usize,
-                limit: self.max_payload as usize,
-            });
+            return Err(self.too_large(len));
         }
-        let consumed = header_size + (len as usize);
+        // The prefix is attacker-controlled. On 32-bit targets a `u32` (or
+        // wider) length does not necessarily fit in `usize`, and adding the
+        // header size can overflow, so both steps are checked. A length that
+        // cannot be addressed can never be buffered, so it is reported as
+        // too large rather than "need more bytes".
+        let consumed = usize::try_from(len)
+            .ok()
+            .and_then(|len| len.checked_add(header_size))
+            .ok_or_else(|| self.too_large(len))?;
         if input.len() < consumed {
             return Ok(None);
         }
@@ -176,21 +190,43 @@ impl Framer for LengthPrefixed {
     }
 
     fn write_frame(&self, payload: &[u8], out: &mut WriteBuf<'_>) -> Result<()> {
-        let len = payload.len() as u64;
+        let len = u64::try_from(payload.len()).unwrap_or(u64::MAX);
         if len > self.max_payload {
-            return Err(Error::FrameTooLarge {
-                len: payload.len(),
-                limit: self.max_payload as usize,
-            });
+            return Err(self.too_large(len));
         }
         self.write_prefix(len, out)?;
         out.write_bytes(payload)
     }
 }
 
+/// Convert `value` to `usize`, saturating at `usize::MAX` on targets where
+/// `usize` is narrower than 64 bits.
+#[inline]
+fn saturate_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn huge_u32_prefix_never_panics() {
+        // Regression test for the 32-bit overflow in `header_size + len`.
+        // On 64-bit targets the frame is merely incomplete; on 32-bit targets
+        // the length cannot be addressed and is reported as too large.
+        let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
+        for prefix in [0xFFFF_FFFFu32, 0xFFFF_FFFE, 0xFFFF_FFFD, 0xFFFF_FFFC] {
+            let mut input = [0u8; 6];
+            input[..4].copy_from_slice(&prefix.to_be_bytes());
+            let result = framer.next_frame(&input);
+            if usize::BITS > 32 {
+                assert_eq!(result, Ok(None));
+            } else {
+                assert!(matches!(result, Err(Error::FrameTooLarge { .. })));
+            }
+        }
+    }
 
     #[test]
     fn u8_big_round_trip() {
