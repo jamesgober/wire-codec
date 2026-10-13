@@ -41,10 +41,18 @@ path = "src/lib.rs"
 default = ["std"]
 # Links the standard library. Also enables runtime CPU feature detection in
 # the optional `memchr` dependency (AVX2 on x86_64).
-std = ["memchr?/std"]
+std = ["memchr?/std", "bytes?/std"]
 # Delegate delimiter search to the `memchr` crate (SIMD kernels, linear-time
 # multi-byte search). Off by default: the built-in SWAR scan has no deps.
 memchr = ["dep:memchr"]
+# `codec::FrameCodec`: drive any `Framer` over a `bytes::BytesMut` buffer.
+# Works without `std` (needs `alloc`).
+bytes = ["dep:bytes"]
+# `tokio_util::codec::{Decoder, Encoder}` for `codec::FrameCodec`.
+tokio-util = ["bytes", "std", "dep:tokio-util"]
+# `asynchronous_codec::{Decoder, Encoder}` for `codec::FrameCodec`
+# (futures-io based runtimes: smol, async-std, embassy-net adapters).
+asynchronous-codec = ["bytes", "std", "dep:asynchronous-codec"]
 
 [dependencies]
 # Optional, off by default. Justification (REPS Dependency Management):
@@ -52,6 +60,15 @@ memchr = ["dep:memchr"]
 # maintained, `no_std`, zero transitive dependencies, MSRV 1.61, and dual
 # MIT/Unlicense. Used only by `framing::Delimited`.
 memchr = { version = "2.7", optional = true, default-features = false }
+# Optional integration adapters, off by default (REPS: integration adapters
+# MUST be optional). `bytes` is the Tokio project's buffer crate: no_std,
+# MSRV 1.57, MIT. `tokio-util` (MSRV 1.85, MIT) is used with only its `codec`
+# feature. `asynchronous-codec` (MIT) is the maintained futures-io port of
+# the same traits. Compatible ranges are used because all three follow
+# semver strictly and are pulled in only on request.
+bytes = { version = "1.5", optional = true, default-features = false }
+tokio-util = { version = "0.7.10", optional = true, default-features = false, features = ["codec"] }
+asynchronous-codec = { version = "0.7", optional = true }
 
 [dev-dependencies]
 # Property testing (REPS Testing). proptest 1.11 is the newest release whose

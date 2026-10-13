@@ -106,6 +106,9 @@ pub mod bitfield;
 pub mod buf;
 pub mod checksum;
 pub mod cobs;
+#[cfg(feature = "bytes")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bytes")))]
+pub mod codec;
 pub mod error;
 pub mod framing;
 pub mod packed;
