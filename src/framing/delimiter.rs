@@ -235,6 +235,11 @@ impl Framer for Delimited<'_> {
         *scanned = window.len().saturating_sub(delim_len - 1);
         Ok(None)
     }
+
+    #[inline]
+    fn max_frame_len(&self, payload_len: usize) -> Option<usize> {
+        payload_len.checked_add(self.delimiter.len())
+    }
 }
 
 #[cfg(test)]
@@ -354,9 +359,11 @@ mod tests {
     }
 
     #[test]
-    fn bounded_constructor() {
+    fn bounded_constructor_and_max_frame_len() {
         let framer = Delimited::bounded(b"\r\n").unwrap();
         assert_eq!(framer.max_payload(), Delimited::DEFAULT_MAX_PAYLOAD);
+        assert_eq!(framer.max_frame_len(10), Some(12));
+        assert_eq!(framer.max_frame_len(usize::MAX), None);
     }
 
     #[test]

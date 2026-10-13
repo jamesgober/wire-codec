@@ -149,6 +149,28 @@ pub trait Framer {
         }
         result
     }
+
+    /// Upper bound on the number of bytes [`Framer::write_frame`] writes for
+    /// a payload of `payload_len` bytes.
+    ///
+    /// Returns `None` when the framer cannot say, or when the bound would
+    /// overflow `usize`. Buffer-growing adapters (such as the optional
+    /// `bytes` codec) use it to reserve space in one step. The default
+    /// implementation returns `None`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::framing::{Delimited, Framer};
+    ///
+    /// let framer = Delimited::new(b"\r\n").unwrap();
+    /// assert_eq!(framer.max_frame_len(10), Some(12));
+    /// ```
+    #[inline]
+    fn max_frame_len(&self, payload_len: usize) -> Option<usize> {
+        let _ = payload_len;
+        None
+    }
 }
 
 /// Stateful wrapper that drives a [`Framer`] over a growing input buffer.
@@ -262,6 +284,18 @@ mod tests {
             .unwrap();
         assert_eq!(frame.payload(), b"abcd");
         assert_eq!(scanned, 0);
+    }
+
+    #[test]
+    fn default_max_frame_len_is_unknown() {
+        assert_eq!(FixedFour.max_frame_len(4), None);
+        let mut out = [0u8; 4];
+        let mut buf = WriteBuf::new(&mut out);
+        FixedFour.write_frame(b"wxyz", &mut buf).unwrap();
+        assert_eq!(
+            FixedFour.write_frame(b"w", &mut buf),
+            Err(Error::InvalidEncoding)
+        );
     }
 
     #[test]
