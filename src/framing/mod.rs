@@ -10,6 +10,9 @@
 //! - [`length::LengthPrefixed`] for fixed-width length-prefixed protocols
 //!   (1, 2, 3, 4, or 8 byte prefixes, either byte order, optional length
 //!   adjustment).
+//! - [`varint_prefixed::VarintPrefixed`] for LEB128 length-prefixed
+//!   messages, the "length-delimited" framing used by Protocol Buffers and
+//!   gRPC-style transports.
 //! - [`delimiter::Delimited`] for byte-delimited protocols such as newline-
 //!   terminated text.
 //!
@@ -21,7 +24,7 @@
 //! A framer only guards memory if it has a limit. Use the `bounded`
 //! constructors ([`LengthPrefixed::bounded`], [`Delimited::bounded`]) or
 //! `with_max_payload` for any stream that comes from a peer you do not
-//! control.
+//! control. [`VarintPrefixed::new`] is bounded by default.
 //!
 //! When bytes arrive in pieces, drive the framer through a [`StreamDecoder`]
 //! (or [`Framer::next_frame_from`]) so that a delimiter search resumes where
@@ -32,9 +35,11 @@
 pub mod delimiter;
 pub mod length;
 mod search;
+pub mod varint_prefixed;
 
 pub use delimiter::Delimited;
 pub use length::{Endian, LengthPrefixed, LengthWidth};
+pub use varint_prefixed::VarintPrefixed;
 
 use crate::buf::WriteBuf;
 use crate::error::Result;
@@ -188,10 +193,10 @@ pub trait Framer {
     /// # Example
     ///
     /// ```
-    /// use wire_codec::framing::{Delimited, Framer};
+    /// use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
     ///
-    /// let framer = Delimited::new(b"\r\n").unwrap();
-    /// assert_eq!(framer.max_frame_len(10), Some(12));
+    /// let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
+    /// assert_eq!(framer.max_frame_len(10), Some(14));
     /// ```
     #[inline]
     fn max_frame_len(&self, payload_len: usize) -> Option<usize> {

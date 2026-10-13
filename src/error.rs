@@ -85,8 +85,8 @@ pub enum Error {
     DelimiterNotFound,
     /// Decoded data violated a structural invariant required by the codec.
     ///
-    /// Produced by the canonical varint decoders for overlong encodings. The
-    /// input is corrupt or hostile.
+    /// Produced by the canonical varint decoders and the varint-prefixed
+    /// framer for overlong encodings. The input is corrupt or hostile.
     InvalidEncoding,
     /// A bit-level write requested more bits than the target type can hold,
     /// or a value did not fit in the requested bit width.
