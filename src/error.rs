@@ -135,6 +135,44 @@ impl fmt::Display for Error {
 /// the `std` feature is enabled.
 impl core::error::Error for Error {}
 
+/// Convert into an [`std::io::Error`], for use in I/O-based codecs.
+///
+/// The original [`Error`] is kept as the source and can be recovered with
+/// `io::Error::get_ref` and `downcast_ref`. The [`std::io::ErrorKind`] is
+/// chosen by group: [`Error::UnexpectedEof`] maps to `UnexpectedEof`,
+/// [`Error::BufferFull`] to `WriteZero`, caller misuse
+/// ([`Error::BitOverflow`], [`Error::EmptyDelimiter`],
+/// [`Error::DelimiterInPayload`]) to `InvalidInput`, and everything else to
+/// `InvalidData`.
+///
+/// # Example
+///
+/// ```
+/// use std::io;
+/// use wire_codec::Error;
+///
+/// let io_err = io::Error::from(Error::ChecksumMismatch);
+/// assert_eq!(io_err.kind(), io::ErrorKind::InvalidData);
+/// let inner = io_err.get_ref().and_then(|e| e.downcast_ref::<Error>());
+/// assert_eq!(inner, Some(&Error::ChecksumMismatch));
+/// ```
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+impl From<Error> for std::io::Error {
+    fn from(err: Error) -> Self {
+        use std::io::ErrorKind;
+        let kind = match err {
+            Error::UnexpectedEof => ErrorKind::UnexpectedEof,
+            Error::BufferFull => ErrorKind::WriteZero,
+            Error::BitOverflow | Error::EmptyDelimiter | Error::DelimiterInPayload => {
+                ErrorKind::InvalidInput
+            }
+            _ => ErrorKind::InvalidData,
+        };
+        std::io::Error::new(kind, err)
+    }
+}
+
 /// Result alias used throughout the crate.
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -172,6 +210,29 @@ mod tests {
             Error::FrameTooLarge { len: 9, limit: 4 }.to_string(),
             "frame length 9 exceeds configured limit 4"
         );
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn io_error_kinds() {
+        use std::io::{self, ErrorKind};
+        let cases = [
+            (Error::UnexpectedEof, ErrorKind::UnexpectedEof),
+            (Error::BufferFull, ErrorKind::WriteZero),
+            (Error::BitOverflow, ErrorKind::InvalidInput),
+            (Error::EmptyDelimiter, ErrorKind::InvalidInput),
+            (Error::DelimiterInPayload, ErrorKind::InvalidInput),
+            (Error::VarintOverflow, ErrorKind::InvalidData),
+            (Error::InvalidEncoding, ErrorKind::InvalidData),
+        ];
+        for (err, kind) in cases {
+            let io_err = io::Error::from(err);
+            assert_eq!(io_err.kind(), kind);
+            assert_eq!(
+                io_err.get_ref().and_then(|e| e.downcast_ref::<Error>()),
+                Some(&err)
+            );
+        }
     }
 
     #[test]
