@@ -29,7 +29,7 @@ fn time_loop<F: FnMut()>(name: &str, iterations: usize, mut body: F) {
 }
 
 fn bench_length_prefixed_write() {
-    let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+    let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
     let payload = vec![0xAAu8; 64];
     let mut wire = vec![0u8; 2 + payload.len()];
 
@@ -43,7 +43,7 @@ fn bench_length_prefixed_write() {
 }
 
 fn bench_length_prefixed_read() {
-    let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+    let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
     let payload = vec![0xAAu8; 64];
     let mut wire = vec![0u8; 2 + payload.len()];
     {
@@ -63,7 +63,7 @@ fn bench_length_prefixed_read() {
 }
 
 fn bench_delimited_scan_short() {
-    let framer = Delimited::new(b"\n").expect("non-empty delimiter");
+    let framer = Delimited::unbounded(b"\n").expect("non-empty delimiter");
     let wire = b"short line\nrest of the buffer that we never reach";
     time_loop("Delimited::next_frame (short line)", ITERATIONS, || {
         let frame = framer
@@ -75,7 +75,7 @@ fn bench_delimited_scan_short() {
 }
 
 fn bench_delimited_scan_long() {
-    let framer = Delimited::new(b"\r\n").expect("non-empty delimiter");
+    let framer = Delimited::unbounded(b"\r\n").expect("non-empty delimiter");
     let mut wire = vec![b'A'; 1024];
     wire.extend_from_slice(b"\r\nbody");
     time_loop(
@@ -92,7 +92,7 @@ fn bench_delimited_scan_long() {
 }
 
 fn bench_delimited_scan_64k() {
-    let framer = Delimited::new(b"\n").expect("non-empty delimiter");
+    let framer = Delimited::unbounded(b"\n").expect("non-empty delimiter");
     let mut wire = vec![b'A'; 64 * 1024];
     wire.push(b'\n');
     let iterations = ITERATIONS / 1_000;

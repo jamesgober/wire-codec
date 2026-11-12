@@ -15,7 +15,7 @@ See [Cargo features](#cargo-features) for the optional integrations.
 
 ```toml
 [dependencies]
-wire-codec = "1.1"
+wire-codec = "1.2"
 ```
 
 The API surface is **stable as of 1.0.0**. New `Error` variants and new
@@ -768,7 +768,7 @@ all make `write_frame` atomic.
 ```rust
 use wire_codec::framing::{Framer, LengthPrefixed, LengthWidth, Endian};
 
-let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+let framer = LengthPrefixed::bounded(LengthWidth::U16, Endian::Big);
 let frame = framer.next_frame(&[0x00, 0x03, b'h', b'i', b'!']).unwrap().unwrap();
 assert_eq!(frame.payload(), b"hi!");
 assert_eq!(framer.max_frame_len(3), Some(5));
@@ -841,8 +841,11 @@ pub struct LengthPrefixed { /* ... */ }
 
 impl LengthPrefixed {
     pub const DEFAULT_MAX_PAYLOAD: u64 = 8 * 1024 * 1024;
-    pub const fn new(width: LengthWidth, endian: Endian) -> Self;
-    pub const fn bounded(width: LengthWidth, endian: Endian) -> Self;
+    #[deprecated(since = "1.2.0")]
+    pub const fn new(width: LengthWidth, endian: Endian) -> Self;       // unbounded
+    pub const fn unbounded(width: LengthWidth, endian: Endian) -> Self; // since 1.2.0
+    pub const fn bounded(width: LengthWidth, endian: Endian) -> Self;   // 8 MiB
+    pub const fn bounded_to(width: LengthWidth, endian: Endian, max: u64) -> Self; // since 1.2.0
     pub const fn with_max_payload(self, max: u64) -> Self;
     pub const fn with_length_adjustment(self, adjustment: i64) -> Self;
     pub const fn width(&self) -> LengthWidth;
@@ -853,8 +856,10 @@ impl LengthPrefixed {
 ```
 
 Each frame is an unsigned integer giving the payload length, then the
-payload. `new` allows the width's full range (4 GiB for `U32`); `bounded`
-caps at `DEFAULT_MAX_PAYLOAD`; `with_max_payload` clamps to the width's
+payload. `bounded` caps at `DEFAULT_MAX_PAYLOAD` and `bounded_to` at the
+limit given; both are meant for peer input. `unbounded` allows the width's
+full range (4 GiB for `U32`), and so does the deprecated `new`, which
+becomes bounded in 2.0. `with_max_payload` clamps to the width's
 maximum. The length adjustment says "payload length = prefix value +
 adjustment" (use `-(header_size)` when the prefix counts itself).
 
@@ -876,7 +881,7 @@ assert_eq!(frame.payload(), b"hello");
 assert_eq!(frame.consumed(), 7);
 
 // A self-counting 4-byte prefix.
-let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big).with_length_adjustment(-4);
+let framer = LengthPrefixed::bounded(LengthWidth::U32, Endian::Big).with_length_adjustment(-4);
 let frame = framer.next_frame(&[0, 0, 0, 6, b'o', b'k']).unwrap().unwrap();
 assert_eq!(frame.payload(), b"ok");
 ```
@@ -924,8 +929,11 @@ pub struct Delimited<'d> { /* ... */ }
 
 impl<'d> Delimited<'d> {
     pub const DEFAULT_MAX_PAYLOAD: usize = 64 * 1024;
-    pub const fn new(delimiter: &'d [u8]) -> Result<Self>;      // unbounded
-    pub const fn bounded(delimiter: &'d [u8]) -> Result<Self>;  // 64 KiB
+    #[deprecated(since = "1.2.0")]
+    pub const fn new(delimiter: &'d [u8]) -> Result<Self>;                    // unbounded
+    pub const fn unbounded(delimiter: &'d [u8]) -> Result<Self>;              // since 1.2.0
+    pub const fn bounded(delimiter: &'d [u8]) -> Result<Self>;                // 64 KiB
+    pub const fn bounded_to(delimiter: &'d [u8], max: usize) -> Result<Self>; // since 1.2.0
     pub const fn with_max_payload(self, max: usize) -> Self;
     pub const fn delimiter(&self) -> &'d [u8];
     pub const fn max_payload(&self) -> usize;
@@ -936,8 +944,11 @@ Frames are separated by a byte sequence (one or more bytes). The delimiter is
 stripped from the emitted payload but counted toward `Frame::consumed`. An
 empty delimiter yields `Error::EmptyDelimiter`.
 
-- **Search.** A portable SWAR scan for the delimiter's first byte (16 bytes
-  per step, safe code), then a tail compare; with the `memchr` feature, the
+- **Search.** A portable SWAR scan (16 bytes per step, safe code). A
+  multi-byte delimiter is found by scanning for its last byte and comparing
+  the bytes before it; after repeated failed candidates the search switches
+  to a Horspool skip table, so input crafted around the delimiter costs a few
+  cheap steps per byte (since 1.2.0). With the `memchr` feature, the
   `memchr` crate's SIMD search. The search never looks further than
   `max_payload + delimiter.len()` bytes.
 - **Limits.** Once that many bytes are buffered without a delimiter, the
@@ -996,7 +1007,7 @@ use wire_codec::framing::{Checksummed, ChecksumScope, Endian, Framer, LengthPref
 use wire_codec::WriteBuf;
 
 let framer = Checksummed::new(
-    LengthPrefixed::new(LengthWidth::U8, Endian::Big),
+    LengthPrefixed::bounded(LengthWidth::U8, Endian::Big),
     Crc16CcittFalse,
     Endian::Big,
 )
@@ -1220,7 +1231,7 @@ behind.
 use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
 use wire_codec::{Error, WriteBuf};
 
-let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+let framer = LengthPrefixed::bounded(LengthWidth::U16, Endian::Big);
 let mut wire = [0u8; 1500]; // one Ethernet MTU
 let mut out = WriteBuf::new(&mut wire);
 

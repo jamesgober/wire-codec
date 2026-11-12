@@ -11,6 +11,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-11-12
+
+Fixes from the 2026-11 independent review. No breaking changes.
+
+### Added
+
+- `LengthPrefixed::bounded_to(width, endian, max)` and
+  `Delimited::bounded_to(delimiter, max)`: bounded constructors with an
+  explicit limit.
+- `LengthPrefixed::unbounded(width, endian)` and
+  `Delimited::unbounded(delimiter)`: the 1.0 unbounded behaviour under a name
+  that says so.
+
+### Deprecated
+
+- `LengthPrefixed::new` and `Delimited::new`. They build unbounded framers (a
+  `U32` prefix allows 4 GiB per frame, a delimiter has no limit), unlike
+  `VarintPrefixed::new`, which is bounded. Use `bounded` or `bounded_to` for
+  input from peers, or `unbounded` to keep the old behaviour. Behaviour is
+  unchanged in 1.x; `new` becomes bounded in 2.0.
+
+### Fixed
+
+- The default (no `memchr`) search for a multi-byte delimiter scanned for its
+  first byte and compared at every hit, which made input built from that byte
+  about 200 times slower to scan than ordinary input. It now scans for the
+  last byte and switches to a Horspool skip table when candidates keep
+  failing, so the cost stays a few cheap steps per byte.
+
+---
+
 ## [1.1.0] — 2026-10-13
 
 Hardening and framing release. Fixes every correctness, security, and
@@ -312,7 +343,8 @@ changes; see "Changed" for the MSRV raise and the behaviour fixes.
 - REPS compliance baseline.
 - CI for Linux/macOS/Windows on stable and MSRV (1.75).
 
-[Unreleased]: https://github.com/jamesgober/wire-codec/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jamesgober/wire-codec/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/jamesgober/wire-codec/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/jamesgober/wire-codec/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jamesgober/wire-codec/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/jamesgober/wire-codec/compare/v0.5.0...v0.9.0

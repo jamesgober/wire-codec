@@ -91,8 +91,9 @@ mod futures {
 
     #[test]
     fn oversized_frame_is_rejected() {
-        let mut codec =
-            FrameCodec::new(LengthPrefixed::new(LengthWidth::U16, Endian::Big).with_max_payload(4));
+        let mut codec = FrameCodec::new(
+            LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big).with_max_payload(4),
+        );
         let mut wire = BytesMut::from(&[0x00, 0x05][..]);
         let err = codec.decode(&mut wire).unwrap_err();
         assert_eq!(

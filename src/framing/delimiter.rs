@@ -7,10 +7,12 @@
 //!
 //! # Limits and streaming
 //!
-//! [`Delimited::new`] keeps the 1.0 behaviour of an unbounded payload size,
+//! [`Delimited::bounded`] caps payloads at [`Delimited::DEFAULT_MAX_PAYLOAD`]
+//! (64 KiB) and [`Delimited::bounded_to`] at a limit you choose: use one of
+//! them for input from untrusted peers. [`Delimited::unbounded`] has no limit,
 //! which lets a peer that never sends the delimiter grow the caller's buffer
-//! without limit. For untrusted input, use [`Delimited::bounded`] (a
-//! [`Delimited::DEFAULT_MAX_PAYLOAD`] cap) or [`Delimited::with_max_payload`].
+//! without bound. `Delimited::new` keeps the 1.0 unbounded behaviour, is
+//! deprecated since 1.2.0, and becomes bounded in 2.0.
 //!
 //! When input arrives in pieces, call [`Framer::next_frame_from`] or use a
 //! [`StreamDecoder`][`crate::framing::StreamDecoder`] so the search resumes
@@ -56,12 +58,15 @@ impl<'d> Delimited<'d> {
     /// bounding the memory a single peer can pin.
     pub const DEFAULT_MAX_PAYLOAD: usize = 64 * 1024;
 
-    /// Build a framer using `delimiter` to separate frames, with no payload
-    /// size limit.
+    /// Build an **unbounded** framer using `delimiter` to separate frames.
     ///
-    /// Without a limit the framer keeps asking for more input until it sees
-    /// the delimiter, however long that takes. Prefer [`Delimited::bounded`]
-    /// for input from untrusted peers.
+    /// **Warning:** there is no payload size limit. The framer keeps asking
+    /// for more input until it sees the delimiter, however long that takes,
+    /// so a peer that never sends it makes a streaming reader buffer without
+    /// a ceiling. Use [`Delimited::bounded`] (64 KiB) or
+    /// [`Delimited::bounded_to`] for input from untrusted peers, and
+    /// [`Delimited::unbounded`] where no limit is really wanted. `new`
+    /// becomes bounded in 2.0.
     ///
     /// # Errors
     ///
@@ -71,13 +76,43 @@ impl<'d> Delimited<'d> {
     /// # Example
     ///
     /// ```
+    /// # #![allow(deprecated)]
     /// use wire_codec::framing::Delimited;
     ///
     /// let framer = Delimited::new(b"\r\n").unwrap();
     /// assert_eq!(framer.max_payload(), usize::MAX);
     /// ```
+    #[deprecated(
+        since = "1.2.0",
+        note = "unbounded: no payload limit at all. Use `Delimited::bounded` or \
+                `Delimited::bounded_to` for peer input, or `Delimited::unbounded` to keep \
+                this behaviour"
+    )]
     #[inline]
     pub const fn new(delimiter: &'d [u8]) -> Result<Self> {
+        Self::unbounded(delimiter)
+    }
+
+    /// Build a framer with no payload size limit: the behaviour of `new`
+    /// before 1.2.0, under a name that says so.
+    ///
+    /// Only for input whose size is already bounded by other means. For peer
+    /// input use [`Delimited::bounded`] or [`Delimited::bounded_to`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyDelimiter`] if `delimiter` is empty.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::framing::Delimited;
+    ///
+    /// let framer = Delimited::unbounded(b"\r\n").unwrap();
+    /// assert_eq!(framer.max_payload(), usize::MAX);
+    /// ```
+    #[inline]
+    pub const fn unbounded(delimiter: &'d [u8]) -> Result<Self> {
         if delimiter.is_empty() {
             return Err(Error::EmptyDelimiter);
         }
@@ -85,6 +120,34 @@ impl<'d> Delimited<'d> {
             delimiter,
             max_payload: usize::MAX,
         })
+    }
+
+    /// Build a framer using `delimiter`, capped at `max` payload bytes per
+    /// frame. Equivalent to `Delimited::unbounded(delimiter)?.with_max_payload(max)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyDelimiter`] if `delimiter` is empty.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::framing::{Delimited, Framer};
+    /// use wire_codec::Error;
+    ///
+    /// let framer = Delimited::bounded_to(b"\n", 4).unwrap();
+    /// assert!(framer.next_frame(b"1234\n").unwrap().is_some());
+    /// assert!(matches!(
+    ///     framer.next_frame(b"123456"),
+    ///     Err(Error::FrameTooLarge { limit: 4, .. })
+    /// ));
+    /// ```
+    #[inline]
+    pub const fn bounded_to(delimiter: &'d [u8], max: usize) -> Result<Self> {
+        match Self::unbounded(delimiter) {
+            Ok(framer) => Ok(framer.with_max_payload(max)),
+            Err(e) => Err(e),
+        }
     }
 
     /// Build a framer using `delimiter`, capped at
@@ -107,10 +170,7 @@ impl<'d> Delimited<'d> {
     /// ```
     #[inline]
     pub const fn bounded(delimiter: &'d [u8]) -> Result<Self> {
-        match Self::new(delimiter) {
-            Ok(framer) => Ok(framer.with_max_payload(Self::DEFAULT_MAX_PAYLOAD)),
-            Err(e) => Err(e),
-        }
+        Self::bounded_to(delimiter, Self::DEFAULT_MAX_PAYLOAD)
     }
 
     /// Set an upper bound on payload size. Frames whose payload would exceed
@@ -125,7 +185,7 @@ impl<'d> Delimited<'d> {
     /// use wire_codec::framing::{Delimited, Framer};
     /// use wire_codec::Error;
     ///
-    /// let framer = Delimited::new(b"\n").unwrap().with_max_payload(4);
+    /// let framer = Delimited::unbounded(b"\n").unwrap().with_max_payload(4);
     /// assert!(framer.next_frame(b"1234\n").unwrap().is_some());
     /// assert!(matches!(
     ///     framer.next_frame(b"123456"),
@@ -278,8 +338,32 @@ mod tests {
     use crate::framing::StreamDecoder;
 
     #[test]
+    #[allow(deprecated)]
+    fn deprecated_new_is_unbounded_and_bounded_to_caps() {
+        assert_eq!(Delimited::new(b"ab"), Delimited::unbounded(b"ab"));
+        assert_eq!(
+            Delimited::unbounded(b"ab").unwrap().max_payload(),
+            usize::MAX
+        );
+        assert!(matches!(
+            Delimited::bounded_to(b"", 4),
+            Err(Error::EmptyDelimiter)
+        ));
+        let capped = Delimited::bounded_to(b"ab", 4).unwrap();
+        assert_eq!(capped.max_payload(), 4);
+        assert!(matches!(
+            capped.next_frame(b"xxxxxxx"),
+            Err(Error::FrameTooLarge { limit: 4, .. })
+        ));
+        assert_eq!(
+            Delimited::bounded(b"ab"),
+            Delimited::bounded_to(b"ab", Delimited::DEFAULT_MAX_PAYLOAD)
+        );
+    }
+
+    #[test]
     fn newline_round_trip() {
-        let framer = Delimited::new(b"\n").unwrap();
+        let framer = Delimited::unbounded(b"\n").unwrap();
         let mut storage = [0u8; 32];
         let mut buf = WriteBuf::new(&mut storage);
         framer.write_frame(b"hello", &mut buf).unwrap();
@@ -293,7 +377,7 @@ mod tests {
 
     #[test]
     fn multi_byte_delimiter() {
-        let framer = Delimited::new(b"\r\n").unwrap();
+        let framer = Delimited::unbounded(b"\r\n").unwrap();
         let frame = framer.next_frame(b"GET /\r\nrest").unwrap().unwrap();
         assert_eq!(frame.payload(), b"GET /");
         assert_eq!(frame.consumed(), 7);
@@ -301,7 +385,7 @@ mod tests {
 
     #[test]
     fn overlapping_delimiter_prefix() {
-        let framer = Delimited::new(b"\r\n").unwrap();
+        let framer = Delimited::unbounded(b"\r\n").unwrap();
         let frame = framer.next_frame(b"ab\r\r\ncd").unwrap().unwrap();
         assert_eq!(frame.payload(), b"ab\r");
         assert_eq!(frame.consumed(), 5);
@@ -309,7 +393,7 @@ mod tests {
 
     #[test]
     fn no_delimiter_returns_none() {
-        let framer = Delimited::new(b"\n").unwrap();
+        let framer = Delimited::unbounded(b"\n").unwrap();
         assert_eq!(framer.next_frame(b"no terminator here").unwrap(), None);
     }
 
@@ -318,14 +402,14 @@ mod tests {
         // Input is 6 bytes; max_payload=3 limits the scan window to 4 bytes
         // (3 + delimiter length). The delimiter is beyond the window, so the
         // framer bails with FrameTooLarge instead of scanning to the end.
-        let framer = Delimited::new(b"\n").unwrap().with_max_payload(3);
+        let framer = Delimited::unbounded(b"\n").unwrap().with_max_payload(3);
         let result = framer.next_frame(b"abcde\n");
         assert_eq!(result, Err(Error::FrameTooLarge { len: 4, limit: 3 }));
     }
 
     #[test]
     fn read_limit_boundaries() {
-        let framer = Delimited::new(b"\r\n").unwrap().with_max_payload(3);
+        let framer = Delimited::unbounded(b"\r\n").unwrap().with_max_payload(3);
         // Exactly max_payload bytes of payload is accepted.
         let frame = framer.next_frame(b"abc\r\n").unwrap().unwrap();
         assert_eq!(frame.payload(), b"abc");
@@ -342,7 +426,7 @@ mod tests {
 
     #[test]
     fn write_limit_boundaries() {
-        let framer = Delimited::new(b"\n").unwrap().with_max_payload(3);
+        let framer = Delimited::unbounded(b"\n").unwrap().with_max_payload(3);
         let mut storage = [0u8; 16];
         let mut buf = WriteBuf::new(&mut storage);
         framer.write_frame(b"abc", &mut buf).unwrap();
@@ -355,7 +439,7 @@ mod tests {
 
     #[test]
     fn write_rejects_delimiter_inside_payload() {
-        let framer = Delimited::new(b"\r\n").unwrap();
+        let framer = Delimited::unbounded(b"\r\n").unwrap();
         let mut storage = [0u8; 16];
         let mut buf = WriteBuf::new(&mut storage);
         assert_eq!(
@@ -384,7 +468,7 @@ mod tests {
             (b"abab", b"xab", true),
         ];
         for (delim, payload, rejected) in cases {
-            let framer = Delimited::new(delim).unwrap();
+            let framer = Delimited::unbounded(delim).unwrap();
             let mut buf = WriteBuf::new(&mut storage);
             let result = framer.write_frame(payload, &mut buf);
             if rejected {
@@ -405,7 +489,7 @@ mod tests {
 
     #[test]
     fn write_is_atomic_on_buffer_full() {
-        let framer = Delimited::new(b"\r\n").unwrap();
+        let framer = Delimited::unbounded(b"\r\n").unwrap();
         let mut storage = [0u8; 4];
         let mut buf = WriteBuf::new(&mut storage);
         assert_eq!(framer.write_frame(b"abc", &mut buf), Err(Error::BufferFull));
@@ -416,7 +500,7 @@ mod tests {
 
     #[test]
     fn empty_payload_is_valid() {
-        let framer = Delimited::new(b"\n").unwrap();
+        let framer = Delimited::unbounded(b"\n").unwrap();
         let frame = framer.next_frame(b"\nrest").unwrap().unwrap();
         assert_eq!(frame.payload(), b"");
         assert_eq!(frame.consumed(), 1);
@@ -424,7 +508,10 @@ mod tests {
 
     #[test]
     fn empty_delimiter_rejected() {
-        assert!(matches!(Delimited::new(b""), Err(Error::EmptyDelimiter)));
+        assert!(matches!(
+            Delimited::unbounded(b""),
+            Err(Error::EmptyDelimiter)
+        ));
         assert!(matches!(
             Delimited::bounded(b""),
             Err(Error::EmptyDelimiter)
@@ -441,7 +528,7 @@ mod tests {
 
     #[test]
     fn resumable_scan_handles_split_delimiter() {
-        let framer = Delimited::new(b"\r\n").unwrap();
+        let framer = Delimited::unbounded(b"\r\n").unwrap();
         let mut scanned = 0;
         assert_eq!(framer.next_frame_from(b"abc\r", &mut scanned), Ok(None));
         // The trailing '\r' may begin the delimiter, so it is not skipped.
@@ -456,7 +543,7 @@ mod tests {
 
     #[test]
     fn resumable_scan_clamps_oversized_hint() {
-        let framer = Delimited::new(b"\n").unwrap();
+        let framer = Delimited::unbounded(b"\n").unwrap();
         let mut scanned = 1_000;
         // The hint is a promise about the input; an out-of-range value is
         // clamped rather than trusted.
@@ -469,7 +556,7 @@ mod tests {
         // A 256 KiB line delivered one byte at a time. With the resumable
         // scan each call only looks at the new byte, so the total number of
         // bytes examined is bounded by the input length plus overlap.
-        let framer = Delimited::new(b"\r\n").unwrap();
+        let framer = Delimited::unbounded(b"\r\n").unwrap();
         let mut decoder = StreamDecoder::new(framer);
         let mut line = vec![b'x'; 256 * 1024];
         line.extend_from_slice(b"\r\n");
