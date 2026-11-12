@@ -185,17 +185,17 @@ pub fn length_prefixed(data: &[u8]) {
     };
     let max = u64::from(byte(config, 1)) * 3;
     let adjustment = i64::from(byte(config, 2) as i8);
-    let framer = LengthPrefixed::new(width, endian)
+    let framer = LengthPrefixed::unbounded(width, endian)
         .with_max_payload(max)
         .with_length_adjustment(adjustment);
     check_frame(&framer, input, true);
     check_streaming(&framer, input);
     // Unbounded and hostile prefixes must not panic either.
-    let _ = LengthPrefixed::new(width, endian).next_frame(input);
-    let _ = LengthPrefixed::new(width, endian)
+    let _ = LengthPrefixed::unbounded(width, endian).next_frame(input);
+    let _ = LengthPrefixed::unbounded(width, endian)
         .with_length_adjustment(i64::MAX)
         .next_frame(input);
-    let _ = LengthPrefixed::new(width, endian)
+    let _ = LengthPrefixed::unbounded(width, endian)
         .with_length_adjustment(i64::MIN)
         .next_frame(input);
 }
@@ -204,19 +204,19 @@ pub fn delimited(data: &[u8]) {
     let (config, input) = split_config(data, 4);
     let delim_len = 1 + usize::from(byte(config, 0)) % 3;
     let delimiter = &config[1.min(config.len())..(1 + delim_len).min(config.len())];
-    let Ok(framer) = Delimited::new(delimiter) else {
+    let Ok(framer) = Delimited::unbounded(delimiter) else {
         return;
     };
     let framer = framer.with_max_payload(usize::from(byte(config, 0) >> 2));
     check_frame(&framer, input, true);
     check_streaming(&framer, input);
-    check_streaming(&Delimited::new(delimiter).unwrap(), input);
+    check_streaming(&Delimited::unbounded(delimiter).unwrap(), input);
 
     // Writing the raw input as a payload either round-trips or is rejected
     // because it contains the delimiter.
     let mut out = vec![0u8; input.len() + delimiter.len()];
     let mut w = WriteBuf::new(&mut out);
-    let unbounded = Delimited::new(delimiter).unwrap();
+    let unbounded = Delimited::unbounded(delimiter).unwrap();
     match unbounded.write_frame(input, &mut w) {
         Ok(()) => {
             let n = w.position();
@@ -252,7 +252,7 @@ pub fn checksummed(data: &[u8]) {
         Endian::Little
     };
     let crc16 = Checksummed::new(
-        LengthPrefixed::new(LengthWidth::U8, endian),
+        LengthPrefixed::unbounded(LengthWidth::U8, endian),
         Crc16CcittFalse,
         endian,
     );

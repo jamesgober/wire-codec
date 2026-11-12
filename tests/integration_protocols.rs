@@ -10,7 +10,7 @@ use wire_codec::{Decode, Encode, ReadBuf, Result, WriteBuf, varint, zigzag};
 
 #[test]
 fn length_prefixed_stream_with_partial_delivery() {
-    let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+    let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
     let messages: [&[u8]; 4] = [b"first", b"second message", b"", b"x"];
 
     // Encode the whole stream into one wire buffer.
@@ -56,7 +56,7 @@ fn length_prefixed_stream_with_partial_delivery() {
 
 #[test]
 fn newline_protocol_parses_commands() {
-    let framer = Delimited::new(b"\n").unwrap().with_max_payload(1024);
+    let framer = Delimited::unbounded(b"\n").unwrap().with_max_payload(1024);
     let transcript = b"PING\nECHO hello world\nQUIT\n";
 
     let mut input: &[u8] = transcript;
@@ -77,7 +77,7 @@ fn newline_protocol_parses_commands() {
 
 #[test]
 fn crlf_protocol_extracts_request_line_and_headers() {
-    let framer = Delimited::new(b"\r\n").unwrap();
+    let framer = Delimited::unbounded(b"\r\n").unwrap();
     let request = b"GET /index.html HTTP/1.1\r\nHost: example.com\r\nUser-Agent: wire-codec/0.9\r\n\r\nbody-bytes";
 
     let mut input: &[u8] = request;
@@ -164,7 +164,7 @@ fn event_record_pipeline() {
         },
     ];
 
-    let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+    let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
 
     // Encode every event into a varint-prefixed record, then wrap each in a
     // length-prefixed frame. Two layers of framing, which is how real
@@ -208,7 +208,7 @@ fn event_record_pipeline() {
 
 #[test]
 fn framer_signals_more_bytes_needed_without_consuming() {
-    let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
+    let framer = LengthPrefixed::unbounded(LengthWidth::U32, Endian::Big);
 
     // Build a payload of 100 bytes wrapped in its frame.
     let payload = vec![0xAAu8; 100];

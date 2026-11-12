@@ -28,7 +28,7 @@ use crate::framing::{Endian, Frame, Framer};
 /// use wire_codec::checksum::Crc16CcittFalse;
 /// use wire_codec::framing::{Checksummed, ChecksumScope, Endian, LengthPrefixed, LengthWidth};
 ///
-/// let inner = LengthPrefixed::new(LengthWidth::U8, Endian::Big);
+/// let inner = LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big);
 /// let framer = Checksummed::new(inner, Crc16CcittFalse, Endian::Big)
 ///     .with_scope(ChecksumScope::Payload);
 /// assert_eq!(framer.scope(), ChecksumScope::Payload);
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn trailer_byte_order_and_coverage() {
-        let inner = LengthPrefixed::new(LengthWidth::U8, Endian::Big);
+        let inner = LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big);
         let mut out = [0u8; 16];
 
         let framer = Checksummed::new(inner, Crc16CcittFalse, Endian::Big);
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn corrupted_header_is_detected_with_frame_scope() {
-        let inner = LengthPrefixed::new(LengthWidth::U8, Endian::Big);
+        let inner = LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big);
         let framer = Checksummed::new(inner, Crc32, Endian::Big);
         let mut out = [0u8; 16];
         let mut buf = WriteBuf::new(&mut out);
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn write_is_atomic_when_trailer_does_not_fit() {
-        let inner = LengthPrefixed::new(LengthWidth::U8, Endian::Big);
+        let inner = LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big);
         let framer = Checksummed::new(inner, Crc32, Endian::Big);
         // Room for the inner frame (4 bytes) but not the 4-byte trailer.
         let mut out = [0xEEu8; 6];

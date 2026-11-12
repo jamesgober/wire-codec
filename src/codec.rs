@@ -390,7 +390,7 @@ mod tests {
     fn resynchronising_after_an_error_does_not_merge_lines() {
         // Regression test for WC2-001, the verifier's scenario: an over-long
         // line, then the caller clears the buffer and feeds fresh lines.
-        let framer = Delimited::new(b"\n").unwrap().with_max_payload(8);
+        let framer = Delimited::unbounded(b"\n").unwrap().with_max_payload(8);
         let mut codec = FrameCodec::new(framer);
         let mut src = BytesMut::from(&b"aaaaaaa"[..]);
         assert_eq!(codec.decode_frame(&mut src).unwrap(), None);
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn errors_leave_buffers_untouched() {
-        let mut codec = FrameCodec::new(Delimited::new(b"\n").unwrap().with_max_payload(3));
+        let mut codec = FrameCodec::new(Delimited::unbounded(b"\n").unwrap().with_max_payload(3));
         let mut dst = BytesMut::from(&b"keep"[..]);
         assert_eq!(
             codec.encode_frame(b"a\nb", &mut dst),

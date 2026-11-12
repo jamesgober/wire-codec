@@ -41,7 +41,7 @@ proptest! {
         endian in endian_strategy(),
         payload in proptest::collection::vec(any::<u8>(), 0..MAX_PROP_PAYLOAD),
     ) {
-        let framer = LengthPrefixed::new(width, endian);
+        let framer = LengthPrefixed::unbounded(width, endian);
         let mut wire = vec![0u8; width.header_size() + payload.len()];
         let mut buf = WriteBuf::new(&mut wire);
         framer.write_frame(&payload, &mut buf).unwrap();
@@ -60,7 +60,7 @@ proptest! {
         payload in proptest::collection::vec(any::<u8>(), 1..MAX_PROP_PAYLOAD),
         cut in 0usize..MAX_PROP_PAYLOAD,
     ) {
-        let framer = LengthPrefixed::new(width, endian);
+        let framer = LengthPrefixed::unbounded(width, endian);
         let mut wire = vec![0u8; width.header_size() + payload.len()];
         let mut buf = WriteBuf::new(&mut wire);
         framer.write_frame(&payload, &mut buf).unwrap();
@@ -78,7 +78,7 @@ proptest! {
         cap in 0u64..32,
         overhead in 1usize..16,
     ) {
-        let framer = LengthPrefixed::new(width, endian).with_max_payload(cap);
+        let framer = LengthPrefixed::unbounded(width, endian).with_max_payload(cap);
         let payload = vec![0u8; (cap as usize) + overhead];
         let mut wire = vec![0u8; width.header_size() + payload.len()];
         let mut buf = WriteBuf::new(&mut wire);
@@ -93,7 +93,7 @@ proptest! {
     ) {
         // Any outcome is acceptable here except a panic; the result is
         // deliberately discarded.
-        let framer = LengthPrefixed::new(width, endian).with_max_payload(64);
+        let framer = LengthPrefixed::unbounded(width, endian).with_max_payload(64);
         let _ = framer.next_frame(&bytes);
     }
 
@@ -109,7 +109,7 @@ proptest! {
         // Build a stable lifetime for `delim` by leaking it; tiny allocation
         // per case is acceptable for a property test.
         let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
-        let framer = Delimited::new(delim_static).unwrap();
+        let framer = Delimited::unbounded(delim_static).unwrap();
 
         let mut wire = vec![0u8; payload.len() + delim_static.len()];
         let mut buf = WriteBuf::new(&mut wire);
@@ -138,7 +138,7 @@ proptest! {
         tail in proptest::collection::vec(any::<u8>(), 0..32),
     ) {
         let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
-        let framer = Delimited::new(delim_static).unwrap();
+        let framer = Delimited::unbounded(delim_static).unwrap();
         let mut payload = head;
         payload.extend_from_slice(delim_static);
         payload.extend_from_slice(&tail);
@@ -155,7 +155,7 @@ proptest! {
     ) {
         // A small alphabet makes delimiters (and near-misses) frequent.
         let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
-        let framer = Delimited::new(delim_static).unwrap();
+        let framer = Delimited::unbounded(delim_static).unwrap();
         let mut batch = Vec::new();
         let mut rest: &[u8] = &bytes;
         while let Some(frame) = framer.next_frame(rest).unwrap() {
@@ -182,7 +182,7 @@ proptest! {
         let delim_static: &'static [u8] = Box::leak(delim.into_boxed_slice());
         // Any outcome is acceptable here except a panic; the result is
         // deliberately discarded.
-        let framer = Delimited::new(delim_static).unwrap().with_max_payload(128);
+        let framer = Delimited::unbounded(delim_static).unwrap().with_max_payload(128);
         let _ = framer.next_frame(&bytes);
     }
 }

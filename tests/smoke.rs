@@ -57,7 +57,7 @@ fn record_round_trip_through_length_prefixed_framer() {
     assert_eq!(record_len, record.encoded_size());
 
     // Wrap the encoded record in a length-prefixed frame.
-    let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+    let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
     let mut wire = [0u8; 64];
     let mut wire_buf = WriteBuf::new(&mut wire);
     framer.write_frame(encoded_record, &mut wire_buf).unwrap();
@@ -74,7 +74,7 @@ fn record_round_trip_through_length_prefixed_framer() {
 
 #[test]
 fn delimited_stream_yields_consecutive_frames() {
-    let framer = Delimited::new(b"\n").unwrap();
+    let framer = Delimited::unbounded(b"\n").unwrap();
 
     let mut wire = [0u8; 64];
     let mut buf = WriteBuf::new(&mut wire);

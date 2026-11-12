@@ -6,7 +6,7 @@ use wire_codec::WriteBuf;
 use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
 
 fn main() {
-    let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+    let framer = LengthPrefixed::bounded(LengthWidth::U16, Endian::Big);
     let messages: [&[u8]; 3] = [b"hello", b"wire-codec", b"goodbye"];
 
     let mut wire = [0u8; 128];

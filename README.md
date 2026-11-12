@@ -103,7 +103,7 @@ underneath that work.
 
 ```toml
 [dependencies]
-wire-codec = "1.1"
+wire-codec = "1.2"
 ```
 
 ```rust
@@ -144,8 +144,7 @@ use wire_codec::WriteBuf;
 use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
 
 // 16-bit big-endian length, capped at 4 KiB per frame.
-let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big)
-    .with_max_payload(4096);
+let framer = LengthPrefixed::bounded_to(LengthWidth::U16, Endian::Big, 4096);
 
 let mut out = [0u8; 64];
 let mut buf = WriteBuf::new(&mut out);
@@ -218,17 +217,22 @@ for chunk in [&b"PI"[..], b"NG\nQU", b"IT\n"] {
 
 ### Untrusted input
 
-`LengthPrefixed::new` and `Delimited::new` keep their 1.0 behaviour and
-accept payloads as large as the prefix can describe (4 GiB for a `u32`
-prefix, unbounded for a delimiter). Anything reading from a peer you do not
-control should use a limit:
+Anything reading from a peer you do not control should use a limit:
 
-| Constructor | Default limit |
-| ----------- | ------------- |
+| Constructor | Limit |
+| ----------- | ----- |
 | `LengthPrefixed::bounded(width, endian)` | 8 MiB (or the width's maximum, if smaller) |
+| `LengthPrefixed::bounded_to(width, endian, max)` | `max` (or the width's maximum, if smaller) |
 | `VarintPrefixed::new()` | 8 MiB |
 | `Delimited::bounded(delimiter)` | 64 KiB |
+| `Delimited::bounded_to(delimiter, max)` | `max` |
 | any framer `.with_max_payload(n)` | `n` |
+
+`LengthPrefixed::unbounded` and `Delimited::unbounded` accept payloads as
+large as the prefix can describe (4 GiB for a `u32` prefix) or, for a
+delimiter, any size; use them only where something else bounds the input.
+`LengthPrefixed::new` and `Delimited::new` keep that 1.0 unbounded
+behaviour, are deprecated since 1.2.0, and become bounded in 2.0.
 
 ### Compact integers (varint + zigzag)
 
@@ -457,7 +461,7 @@ To use the crate without `std`:
 
 ```toml
 [dependencies]
-wire-codec = { version = "1.1", default-features = false }
+wire-codec = { version = "1.2", default-features = false }
 ```
 
 ---

@@ -115,7 +115,7 @@ impl<'a> Frame<'a> {
 /// ```
 /// use wire_codec::framing::{Framer, LengthPrefixed, LengthWidth, Endian};
 ///
-/// let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+/// let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
 /// let input = &[0x00, 0x03, b'h', b'i', b'!'];
 /// let frame = framer.next_frame(input).unwrap().unwrap();
 /// assert_eq!(frame.payload(), b"hi!");
@@ -204,7 +204,7 @@ pub trait Framer {
     /// ```
     /// use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
     ///
-    /// let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
+    /// let framer = LengthPrefixed::unbounded(LengthWidth::U32, Endian::Big);
     /// assert_eq!(framer.max_frame_len(10), Some(14));
     /// ```
     #[inline]
@@ -349,7 +349,7 @@ mod tests {
     fn stream_decoder_clears_progress_on_error() {
         // Regression test (WC2-001): a stale hint after an error made the
         // decoder skip the delimiter of the next, unrelated input.
-        let framer = Delimited::new(b"\n").unwrap().with_max_payload(8);
+        let framer = Delimited::unbounded(b"\n").unwrap().with_max_payload(8);
         let mut decoder = StreamDecoder::new(framer);
         assert_eq!(decoder.decode(b"aaaaaaa").unwrap(), None);
         assert_eq!(decoder.scanned, 7);
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn stream_decoder_accessors_and_reset() {
-        let mut decoder = StreamDecoder::new(Delimited::new(b"\n").unwrap());
+        let mut decoder = StreamDecoder::new(Delimited::unbounded(b"\n").unwrap());
         assert_eq!(decoder.decode(b"abc").unwrap(), None);
         assert_eq!(decoder.scanned, 3);
         decoder.reset();

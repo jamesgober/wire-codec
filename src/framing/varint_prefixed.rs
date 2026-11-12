@@ -13,8 +13,8 @@ use crate::varint::{self, MAX_LEN_U64};
 
 /// Varint length-prefixed framer.
 ///
-/// Unlike [`LengthPrefixed::new`][`crate::framing::LengthPrefixed::new`],
-/// this framer is bounded by default: [`VarintPrefixed::new`] caps payloads
+/// Unlike the deprecated `LengthPrefixed::new`, this framer is bounded by
+/// default: [`VarintPrefixed::new`] caps payloads
 /// at [`VarintPrefixed::DEFAULT_MAX_PAYLOAD`], and it rejects overlong
 /// (non-canonical) prefixes so every frame has exactly one valid encoding.
 /// Both can be relaxed.

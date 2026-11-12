@@ -9,9 +9,7 @@ fn main() {
     // Pretend this came off the network. Two complete commands and a partial
     // third command with no trailing newline.
     let transcript = b"PING\nECHO hello world\nQUI";
-    let framer = Delimited::new(b"\n")
-        .expect("non-empty delimiter")
-        .with_max_payload(1024);
+    let framer = Delimited::bounded_to(b"\n", 1024).expect("non-empty delimiter");
 
     let mut input: &[u8] = transcript;
     let mut frame_index = 0usize;

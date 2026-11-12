@@ -8,12 +8,14 @@
 //!
 //! # Limits
 //!
-//! [`LengthPrefixed::new`] keeps the 1.0 behaviour: the payload limit is the
-//! largest value the prefix can encode (4 GiB for [`LengthWidth::U32`]). A
+//! [`LengthPrefixed::bounded`] caps payloads at
+//! [`LengthPrefixed::DEFAULT_MAX_PAYLOAD`] (8 MiB) and
+//! [`LengthPrefixed::bounded_to`] at a limit you choose: use one of them for
+//! input from untrusted peers. [`LengthPrefixed::unbounded`] sets the limit to
+//! the largest value the prefix can encode (4 GiB for [`LengthWidth::U32`]); a
 //! caller that buffers until a frame is complete would buffer that much for a
-//! hostile peer. For untrusted input, use [`LengthPrefixed::bounded`] (a
-//! [`LengthPrefixed::DEFAULT_MAX_PAYLOAD`] cap) or
-//! [`LengthPrefixed::with_max_payload`].
+//! hostile peer. `LengthPrefixed::new` keeps the 1.0 unbounded behaviour, is
+//! deprecated since 1.2.0, and becomes bounded in 2.0.
 
 use crate::buf::WriteBuf;
 use crate::error::{Error, Result};
@@ -93,7 +95,7 @@ impl LengthWidth {
 /// ```
 /// use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
 ///
-/// let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Little);
+/// let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Little);
 /// let frame = framer.next_frame(&[0x02, 0x00, b'o', b'k']).unwrap().unwrap();
 /// assert_eq!(frame.payload(), b"ok");
 /// ```
@@ -113,7 +115,7 @@ pub enum Endian {
 /// use wire_codec::WriteBuf;
 /// use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
 ///
-/// let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+/// let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
 ///
 /// let mut out = [0u8; 16];
 /// let mut buf = WriteBuf::new(&mut out);
@@ -139,29 +141,89 @@ impl LengthPrefixed {
     /// Matches the default of `tokio_util::codec::LengthDelimitedCodec`.
     pub const DEFAULT_MAX_PAYLOAD: u64 = 8 * 1024 * 1024;
 
-    /// Build a framer using the given prefix width and endianness.
+    /// Build an **unbounded** framer using the given prefix width and
+    /// endianness.
     ///
-    /// The maximum payload size defaults to the largest value the prefix can
-    /// encode. Use [`LengthPrefixed::bounded`] or
-    /// [`LengthPrefixed::with_max_payload`] for untrusted input.
+    /// **Warning:** the payload limit is the largest value the prefix can
+    /// encode: 4 GiB for [`LengthWidth::U32`], and for [`LengthWidth::U64`]
+    /// everything addressable. A peer that sends a large prefix and then
+    /// trickles bytes makes a streaming reader (`tokio_util::codec::Framed`,
+    /// [`StreamDecoder`](crate::framing::StreamDecoder)) buffer toward that
+    /// size. Use [`LengthPrefixed::bounded`] (8 MiB) or
+    /// [`LengthPrefixed::bounded_to`] for input from untrusted peers, and
+    /// [`LengthPrefixed::unbounded`] where the full range is really wanted.
+    /// `new` becomes bounded in 2.0.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #![allow(deprecated)]
+    /// use wire_codec::framing::{Endian, LengthPrefixed, LengthWidth};
+    ///
+    /// let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
+    /// assert_eq!(framer.max_payload(), u64::from(u32::MAX));
+    /// ```
+    #[deprecated(
+        since = "1.2.0",
+        note = "unbounded: the payload limit is the prefix maximum (4 GiB for U32). \
+                Use `LengthPrefixed::bounded` or `LengthPrefixed::bounded_to` for peer \
+                input, or `LengthPrefixed::unbounded` to keep this behaviour"
+    )]
+    #[inline]
+    #[must_use]
+    pub const fn new(width: LengthWidth, endian: Endian) -> Self {
+        Self::unbounded(width, endian)
+    }
+
+    /// Build a framer whose payload limit is the largest value the prefix
+    /// can encode: the behaviour of `new` before 1.2.0, under a name that
+    /// says so.
+    ///
+    /// Only for input whose size is already bounded by other means (a
+    /// trusted local file, a transport that caps frames itself). For peer
+    /// input use [`LengthPrefixed::bounded`] or
+    /// [`LengthPrefixed::bounded_to`].
     ///
     /// # Example
     ///
     /// ```
     /// use wire_codec::framing::{Endian, LengthPrefixed, LengthWidth};
     ///
-    /// let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
-    /// assert_eq!(framer.max_payload(), u64::from(u32::MAX));
+    /// let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
+    /// assert_eq!(framer.max_payload(), 65_535);
     /// ```
     #[inline]
     #[must_use]
-    pub const fn new(width: LengthWidth, endian: Endian) -> Self {
+    pub const fn unbounded(width: LengthWidth, endian: Endian) -> Self {
         Self {
             width,
             endian,
             max_payload: width.max_payload(),
             adjustment: 0,
         }
+    }
+
+    /// Build a framer capped at `max` payload bytes (or the width's own
+    /// maximum, if smaller). Equivalent to
+    /// `LengthPrefixed::unbounded(width, endian).with_max_payload(max)`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
+    /// use wire_codec::Error;
+    ///
+    /// let framer = LengthPrefixed::bounded_to(LengthWidth::U32, Endian::Big, 1024);
+    /// assert_eq!(framer.max_payload(), 1024);
+    /// assert!(matches!(
+    ///     framer.next_frame(&[0, 0, 0x10, 0]),
+    ///     Err(Error::FrameTooLarge { .. })
+    /// ));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn bounded_to(width: LengthWidth, endian: Endian, max: u64) -> Self {
+        Self::unbounded(width, endian).with_max_payload(max)
     }
 
     /// Build a framer capped at [`LengthPrefixed::DEFAULT_MAX_PAYLOAD`]
@@ -184,7 +246,7 @@ impl LengthPrefixed {
     #[inline]
     #[must_use]
     pub const fn bounded(width: LengthWidth, endian: Endian) -> Self {
-        Self::new(width, endian).with_max_payload(Self::DEFAULT_MAX_PAYLOAD)
+        Self::bounded_to(width, endian, Self::DEFAULT_MAX_PAYLOAD)
     }
 
     /// Override the payload size limit enforced when reading and writing frames.
@@ -197,7 +259,7 @@ impl LengthPrefixed {
     /// ```
     /// use wire_codec::framing::{Endian, LengthPrefixed, LengthWidth};
     ///
-    /// let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big).with_max_payload(1_000);
+    /// let framer = LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big).with_max_payload(1_000);
     /// assert_eq!(framer.max_payload(), 255);
     /// ```
     #[inline]
@@ -242,7 +304,7 @@ impl LengthPrefixed {
     /// use wire_codec::framing::{Endian, Framer, LengthPrefixed, LengthWidth};
     ///
     /// // The 2-byte length field counts itself.
-    /// let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big).with_length_adjustment(-2);
+    /// let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big).with_length_adjustment(-2);
     ///
     /// let mut out = [0u8; 8];
     /// let mut buf = WriteBuf::new(&mut out);
@@ -465,11 +527,40 @@ mod tests {
     ];
 
     #[test]
+    #[allow(deprecated)]
+    fn deprecated_new_is_unbounded_and_bounded_to_caps() {
+        let w = LengthWidth::U32;
+        assert_eq!(
+            LengthPrefixed::new(w, Endian::Big),
+            LengthPrefixed::unbounded(w, Endian::Big)
+        );
+        assert_eq!(
+            LengthPrefixed::unbounded(w, Endian::Big).max_payload(),
+            u64::from(u32::MAX)
+        );
+        let capped = LengthPrefixed::bounded_to(w, Endian::Little, 100);
+        assert_eq!(capped.max_payload(), 100);
+        assert_eq!(
+            LengthPrefixed::bounded_to(LengthWidth::U8, Endian::Big, 1000).max_payload(),
+            255
+        );
+        // A prefix above the cap is refused as soon as it arrives.
+        assert!(matches!(
+            capped.next_frame(&101u32.to_le_bytes()),
+            Err(Error::FrameTooLarge { .. })
+        ));
+        assert_eq!(
+            LengthPrefixed::bounded(w, Endian::Big),
+            LengthPrefixed::bounded_to(w, Endian::Big, LengthPrefixed::DEFAULT_MAX_PAYLOAD)
+        );
+    }
+
+    #[test]
     fn huge_u32_prefix_never_panics() {
         // Regression test for the 32-bit overflow in `header_size + len`.
         // On 64-bit targets the frame is merely incomplete; on 32-bit targets
         // the length cannot be addressed and is reported as too large.
-        let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U32, Endian::Big);
         for prefix in [0xFFFF_FFFFu32, 0xFFFF_FFFE, 0xFFFF_FFFD, 0xFFFF_FFFC] {
             let mut input = [0u8; 6];
             input[..4].copy_from_slice(&prefix.to_be_bytes());
@@ -484,7 +575,7 @@ mod tests {
 
     #[test]
     fn huge_u64_prefix_never_panics() {
-        let framer = LengthPrefixed::new(LengthWidth::U64, Endian::Little);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U64, Endian::Little);
         let input = [0xFF; 12];
         assert!(matches!(
             framer.next_frame(&input),
@@ -501,7 +592,7 @@ mod tests {
     fn every_width_and_endian_round_trips() {
         for width in WIDTHS {
             for endian in [Endian::Big, Endian::Little] {
-                let framer = LengthPrefixed::new(width, endian);
+                let framer = LengthPrefixed::unbounded(width, endian);
                 let mut out = [0u8; 32];
                 let mut buf = WriteBuf::new(&mut out);
                 framer.write_frame(b"abc", &mut buf).unwrap();
@@ -533,7 +624,7 @@ mod tests {
             ),
         ];
         for (width, endian, header) in cases {
-            let framer = LengthPrefixed::new(width, endian);
+            let framer = LengthPrefixed::unbounded(width, endian);
             assert_eq!(framer.read_prefix(header), Some(0x0102));
             assert_eq!(framer.read_prefix(&header[1..]), None);
             let (bytes, n) = framer.prefix_bytes(0x0102);
@@ -546,13 +637,13 @@ mod tests {
     #[test]
     fn u24_limits() {
         assert_eq!(LengthWidth::U24.max_payload(), (1 << 24) - 1);
-        let framer = LengthPrefixed::new(LengthWidth::U24, Endian::Big);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U24, Endian::Big);
         assert_eq!(framer.next_frame(&[0xFF, 0xFF, 0xFF, 0x00]), Ok(None));
     }
 
     #[test]
     fn u8_big_round_trip() {
-        let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big);
         let mut out = [0u8; 32];
         let mut buf = WriteBuf::new(&mut out);
         framer.write_frame(b"abc", &mut buf).unwrap();
@@ -566,7 +657,7 @@ mod tests {
 
     #[test]
     fn partial_frame_returns_none() {
-        let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
         // Header advertises 10 bytes but only 3 follow.
         let input = &[0x00, 0x0A, 0x01, 0x02, 0x03];
         assert_eq!(framer.next_frame(input).unwrap(), None);
@@ -574,7 +665,7 @@ mod tests {
 
     #[test]
     fn header_only_input() {
-        let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
         // Exactly the header, advertising an empty payload: a complete frame.
         let frame = framer.next_frame(&[0x00, 0x00]).unwrap().unwrap();
         assert_eq!(frame.payload(), b"");
@@ -587,13 +678,13 @@ mod tests {
 
     #[test]
     fn empty_input_returns_none() {
-        let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big);
         assert_eq!(framer.next_frame(&[]).unwrap(), None);
     }
 
     #[test]
     fn exceeds_max_payload() {
-        let framer = LengthPrefixed::new(LengthWidth::U16, Endian::Big).with_max_payload(4);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U16, Endian::Big).with_max_payload(4);
         let input = &[0x00, 0x05, 0, 0, 0, 0, 0];
         assert_eq!(
             framer.next_frame(input),
@@ -609,7 +700,7 @@ mod tests {
 
     #[test]
     fn write_limit_boundaries() {
-        let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big).with_max_payload(3);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big).with_max_payload(3);
         let mut out = [0u8; 16];
         let mut buf = WriteBuf::new(&mut out);
         framer.write_frame(&[0u8; 3], &mut buf).unwrap();
@@ -622,7 +713,7 @@ mod tests {
 
     #[test]
     fn write_is_atomic_on_buffer_full() {
-        let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big);
+        let framer = LengthPrefixed::unbounded(LengthWidth::U32, Endian::Big);
         let mut out = [0xEEu8; 6];
         let mut buf = WriteBuf::new(&mut out);
         assert_eq!(framer.write_frame(b"abc", &mut buf), Err(Error::BufferFull));
@@ -647,7 +738,8 @@ mod tests {
 
     #[test]
     fn length_adjustment_including_header() {
-        let framer = LengthPrefixed::new(LengthWidth::U32, Endian::Big).with_length_adjustment(-4);
+        let framer =
+            LengthPrefixed::unbounded(LengthWidth::U32, Endian::Big).with_length_adjustment(-4);
         let mut out = [0u8; 16];
         let mut buf = WriteBuf::new(&mut out);
         framer.write_frame(b"xyz", &mut buf).unwrap();
@@ -665,7 +757,8 @@ mod tests {
     #[test]
     fn length_adjustment_positive() {
         // The prefix omits a 2-byte field that is part of the payload.
-        let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big).with_length_adjustment(2);
+        let framer =
+            LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big).with_length_adjustment(2);
         let frame = framer
             .next_frame(&[0x01, b'a', b'b', b'c'])
             .unwrap()
@@ -685,7 +778,8 @@ mod tests {
     #[test]
     fn length_adjustment_overflowing_the_width() {
         // 255 payload bytes plus a self-counting header does not fit in u8.
-        let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big).with_length_adjustment(-1);
+        let framer =
+            LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big).with_length_adjustment(-1);
         let mut out = [0u8; 512];
         let mut buf = WriteBuf::new(&mut out);
         assert!(matches!(
@@ -703,7 +797,8 @@ mod tests {
         framer.write_frame(&[0u8; 254], &mut buf).unwrap();
         assert_eq!(buf.written()[0], 255);
         // A positive adjustment does not raise the payload limit.
-        let framer = LengthPrefixed::new(LengthWidth::U8, Endian::Big).with_length_adjustment(2);
+        let framer =
+            LengthPrefixed::unbounded(LengthWidth::U8, Endian::Big).with_length_adjustment(2);
         assert_eq!(framer.max_payload(), 255);
         assert_eq!(
             framer.next_frame(&[0xFF]),
